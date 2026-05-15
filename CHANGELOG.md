@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-15
+
+Tool description quality pass — written to Glama's Tool Definition Quality
+Score (TDQS) rubric so every tool maximizes Purpose Clarity, Usage
+Guidelines, Behavioral Transparency, Parameter Semantics, Conciseness,
+and Contextual Completeness.
+
 ### Added
 
 - **`current_memory_domain`** field in `bizhawk_get_info` output — reports
@@ -17,14 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Expanded tool descriptions** across the memory r/w family,
-  `bizhawk_frame_advance`, `bizhawk_pause`/`unpause`/`reset`,
-  `bizhawk_screenshot`, and `bizhawk_save_state`/`load_state`. Every
-  parameter now has a `description` field; tool descriptions document
-  endianness, the direct-memory (no MBC/mapper/DMA) write semantics,
-  domain-resolution defaults, frame-latency cost, savestate
-  compatibility constraints, and when to prefer the bulk
-  `_range` variants over multiple typed calls.
+- **Every tool description rewritten to the PURPOSE / USAGE / BEHAVIOR /
+  RETURNS template** — explicit error conditions ("Returns an error if
+  domain is unknown / address out of range / value exceeds max"),
+  explicit when-to-use-this-vs-sibling guidance ("for spans use
+  bizhawk_read_range — one round-trip vs N frame-latency hops"),
+  explicit destructive-behavior notes for every state-mutating tool
+  ("DESTRUCTIVE: overwrites with no undo; snapshot via
+  bizhawk_save_state first"), and explicit return-value shape.
+- **Every parameter now has a `description`** that adds context beyond
+  the JSON Schema (alignment requirements, address-space conventions,
+  range justifications, units). Domain-parameter and address-parameter
+  descriptions are factored into shared constants for consistency.
+- **`additionalProperties: false`** added to all tool schemas to fail
+  fast on misspelled parameter names.
 
 ## [0.1.0] - 2026-05-15
 
@@ -83,5 +96,6 @@ Initial public release.
   encoder serializes it as a clean array rather than an object with
   string keys.
 
-[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.1
 [0.1.0]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.0
