@@ -37,53 +37,59 @@ const TOOLS: Tool[] = [
   },
 
   // ── Memory reads ────────────────────────────────────────────────────────
+  //
+  // All memory r/w tools read/write the underlying emulator memory directly —
+  // they bypass the cartridge bus model (no MBC/mapper paging, no DMA), so
+  // they're appropriate for cheats, debug pokes, and game-state inspection,
+  // but NOT for emulating cartridge behaviour. To seed cart save RAM with
+  // proper semantics, use bizhawk_load_state with a pre-prepared state file.
 
   {
     name: "bizhawk_read8",
-    description: "Read an unsigned byte from memory. By default reads from the system's main memory; pass `domain` to target a specific named memory domain (use list_memory_domains to discover names).",
+    description: "Read an unsigned 8-bit byte from emulator memory at the given address. Returns the value formatted as decimal and hex (e.g. \"0x09C6: 99 (0x63)\"). By default reads from BizHawk's currently selected memory domain (see bizhawk_get_info for which one); pass `domain` to target a specific named memory domain. Use bizhawk_list_memory_domains to discover names — they vary per system (WRAM on SNES, RAM on NES, RDRAM on N64, 68K RAM on Genesis, MainRAM on PSX, EWRAM/IWRAM on GBA).",
     inputSchema: {
       type: "object",
       required: ["address"],
       properties: {
-        address: { type: "integer" },
-        domain:  { type: "string", description: "Optional memory domain name (default: main memory)" },
+        address: { type: "integer", minimum: 0, description: "Byte offset within the chosen memory domain. Domain offsets are 0-based and per-domain (NOT system bus addresses) — e.g. SNES WRAM 0x09C6 not 0x7E09C6." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain. Discover names with bizhawk_list_memory_domains." },
       },
     },
   },
   {
     name: "bizhawk_read16",
-    description: "Read an unsigned 16-bit little-endian value from memory.",
+    description: "Read an unsigned 16-bit little-endian value from emulator memory at the given address. Returns the value formatted as decimal and hex. By default reads from BizHawk's currently selected memory domain; pass `domain` to target a specific one. For values stored big-endian on the original hardware (some N64/PSX/Saturn fields), read with bizhawk_read_range and decode manually — this tool always interprets bytes as little-endian.",
     inputSchema: {
       type: "object",
       required: ["address"],
       properties: {
-        address: { type: "integer" },
-        domain:  { type: "string" },
+        address: { type: "integer", minimum: 0, description: "Byte offset within the chosen memory domain. Reads two consecutive bytes starting here." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain. Discover with bizhawk_list_memory_domains." },
       },
     },
   },
   {
     name: "bizhawk_read32",
-    description: "Read an unsigned 32-bit little-endian value from memory.",
+    description: "Read an unsigned 32-bit little-endian value from emulator memory at the given address. Returns the value formatted as decimal and hex. By default reads from BizHawk's currently selected memory domain; pass `domain` to target a specific one. For big-endian fields or non-aligned multi-word reads, prefer bizhawk_read_range and decode the bytes yourself.",
     inputSchema: {
       type: "object",
       required: ["address"],
       properties: {
-        address: { type: "integer" },
-        domain:  { type: "string" },
+        address: { type: "integer", minimum: 0, description: "Byte offset within the chosen memory domain. Reads four consecutive bytes starting here." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain. Discover with bizhawk_list_memory_domains." },
       },
     },
   },
   {
     name: "bizhawk_read_range",
-    description: "Read a contiguous byte range and return as an integer array. Maximum 4096 bytes per call.",
+    description: "Read a contiguous byte range and return as an integer array (one element per byte, 0-255). Use this instead of multiple bizhawk_read8 calls when you need more than a few bytes — it's a single round-trip vs N frame-latency hops. Maximum 4096 bytes per call (BizHawk's per-call serialization limit). For larger reads, batch in 4 KiB chunks. Useful for two-snapshot memory diffs (RAM-hunt workflow): grab a window before and after a known change, then look for the values that match the delta.",
     inputSchema: {
       type: "object",
       required: ["address", "length"],
       properties: {
-        address: { type: "integer" },
-        length:  { type: "integer", minimum: 1, maximum: 4096 },
-        domain:  { type: "string" },
+        address: { type: "integer", minimum: 0, description: "Starting byte offset within the chosen memory domain." },
+        length:  { type: "integer", minimum: 1, maximum: 4096, description: "Number of consecutive bytes to read (1-4096)." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain." },
       },
     },
   },
@@ -92,58 +98,59 @@ const TOOLS: Tool[] = [
 
   {
     name: "bizhawk_write8",
-    description: "Write a byte to memory.",
+    description: "Write a single unsigned byte (0-255) to emulator memory at the given address. The write goes through BizHawk's memory accessor — direct, immediate, with no bus mediation (no MBC bank-switch trigger, no cartridge mapper side-effects, no DMA). Appropriate for cheats and debug pokes; NOT appropriate for emulating cartridge behaviour. To seed cart save RAM realistically, use bizhawk_load_state with a pre-prepared .State file. Returns confirmation with the address and value.",
     inputSchema: {
       type: "object",
       required: ["address", "value"],
       properties: {
-        address: { type: "integer" },
-        value:   { type: "integer", minimum: 0, maximum: 255 },
-        domain:  { type: "string" },
+        address: { type: "integer", minimum: 0, description: "Byte offset within the chosen memory domain to write to." },
+        value:   { type: "integer", minimum: 0, maximum: 255, description: "Byte value to write (0-255 / 0x00-0xFF)." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain. Discover with bizhawk_list_memory_domains." },
       },
     },
   },
   {
     name: "bizhawk_write16",
-    description: "Write a 16-bit value (LE) to memory.",
+    description: "Write an unsigned 16-bit little-endian value to emulator memory at the given address. Writes two consecutive bytes (low byte first). Direct memory write — no MBC/mapper/DMA mediation, see bizhawk_write8 notes. To write a big-endian 16-bit value, swap the bytes yourself and use bizhawk_write_range. Returns confirmation with the address and value.",
     inputSchema: {
       type: "object",
       required: ["address", "value"],
       properties: {
-        address: { type: "integer" },
-        value:   { type: "integer", minimum: 0, maximum: 65535 },
-        domain:  { type: "string" },
+        address: { type: "integer", minimum: 0, description: "Byte offset within the chosen memory domain. The low byte lands here, high byte at address+1." },
+        value:   { type: "integer", minimum: 0, maximum: 65535, description: "16-bit value to write (0-65535 / 0x0000-0xFFFF)." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain." },
       },
     },
   },
   {
     name: "bizhawk_write32",
-    description: "Write a 32-bit value (LE) to memory.",
+    description: "Write an unsigned 32-bit little-endian value to emulator memory at the given address. Writes four consecutive bytes (least-significant byte first). Direct memory write — no MBC/mapper/DMA mediation, see bizhawk_write8 notes. For big-endian layouts use bizhawk_write_range and pre-byteswap. Returns confirmation with the address and value.",
     inputSchema: {
       type: "object",
       required: ["address", "value"],
       properties: {
-        address: { type: "integer" },
-        value:   { type: "integer", minimum: 0 },
-        domain:  { type: "string" },
+        address: { type: "integer", minimum: 0, description: "Byte offset within the chosen memory domain. LSB lands here, MSB at address+3." },
+        value:   { type: "integer", minimum: 0, maximum: 4294967295, description: "32-bit value to write (0-4294967295 / 0x00000000-0xFFFFFFFF)." },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain." },
       },
     },
   },
   {
     name: "bizhawk_write_range",
-    description: "Write a byte sequence to memory. Maximum 4096 bytes per call.",
+    description: "Write a contiguous byte sequence to emulator memory starting at the given address. Use instead of multiple bizhawk_write8 calls when seeding more than a few bytes — single round-trip vs N frame-latency hops. Maximum 4096 bytes per call (BizHawk serialization limit). Useful for installing cheat tables, patching code blocks, or restoring a captured byte window after experiments. Direct memory write — no MBC/mapper/DMA mediation. Returns the count of bytes written.",
     inputSchema: {
       type: "object",
       required: ["address", "bytes"],
       properties: {
-        address: { type: "integer" },
+        address: { type: "integer", minimum: 0, description: "Starting byte offset within the chosen memory domain. Bytes are written sequentially from here." },
         bytes: {
           type: "array",
           items: { type: "integer", minimum: 0, maximum: 255 },
           minItems: 1,
           maxItems: 4096,
+          description: "Byte values to write, one per element (each 0-255). Length 1-4096.",
         },
-        domain:  { type: "string" },
+        domain:  { type: "string", description: "Optional memory domain name (case-sensitive). Omit to use BizHawk's currently selected domain." },
       },
     },
   },
@@ -176,37 +183,37 @@ const TOOLS: Tool[] = [
 
   {
     name: "bizhawk_pause",
-    description: "Pause emulation.",
+    description: "Pause emulation. The current frame stays on screen and game-logic clocks freeze, but the BizHawk Lua bridge keeps polling — so subsequent memory r/w and other tool calls still work while paused. Use bizhawk_unpause to resume, or bizhawk_frame_advance to step one frame at a time without leaving pause. Some BizHawk cores don't expose pause via the Lua API; check `capabilities.pause` in bizhawk_get_info first if you need to handle that case gracefully.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "bizhawk_unpause",
-    description: "Resume emulation.",
+    description: "Resume emulation after a pause. Counterpart to bizhawk_pause. Some BizHawk cores don't expose unpause via the Lua API; check `capabilities.unpause` in bizhawk_get_info first if you need to handle that case gracefully.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "bizhawk_frame_advance",
-    description: "Step emulation by N frames (default 1). Each call yields the bridge's frame loop, so latency adds up over many frames.",
+    description: "Step emulation by exactly N frames (default 1) and return the new framecount. Useful for frame-precise input automation, animation inspection, or letting the system initialize after a hard reset (RAM is mostly zero in the first ~30 frames). Each step costs roughly one real frame (~16ms at 60Hz) plus one bridge round-trip — so advancing 600 frames takes ~10 seconds wall-clock. For long jumps, prefer bizhawk_save_state / bizhawk_load_state of a pre-prepared state. Works whether emulation is currently paused or running.",
     inputSchema: {
       type: "object",
       properties: {
-        count: { type: "integer", minimum: 1, default: 1 },
+        count: { type: "integer", minimum: 1, default: 1, description: "Number of frames to advance (≥1, default 1). Returned framecount = previous framecount + count." },
       },
     },
   },
   {
     name: "bizhawk_reset",
-    description: "Reset the loaded core (equivalent to a hard reset of the emulated console).",
+    description: "Reset the loaded core — equivalent to a hard reset of the emulated console (power cycle), not a soft NMI/IRQ. RAM contents become indeterminate (typically zeroed), the CPU returns to the reset vector, and the framecount is reset. The loaded ROM stays loaded; only volatile state is cleared. Use bizhawk_load_state instead if you want to return to a specific known good point. Some cores don't expose this via the Lua API; check `capabilities.reboot_core` in bizhawk_get_info first.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "bizhawk_screenshot",
-    description: "Save a screenshot to a file. BizHawk's `client.screenshot` requires an explicit path (no temp-file fallback like the other servers).",
+    description: "Save a PNG screenshot of the current emulator display to a file path. BizHawk's `client.screenshot` requires an explicit absolute path (no temp-file fallback). The image captures whatever the emulator is currently rendering — if you want a screenshot of a specific game state, pause / advance frames / load state first to get the frame you want, then call this. Returns the path written.",
     inputSchema: {
       type: "object",
       required: ["path"],
       properties: {
-        path: { type: "string", description: "Absolute path to save the PNG" },
+        path: { type: "string", description: "Absolute filesystem path to write the PNG to (e.g. C:/temp/snap.png on Windows, /tmp/snap.png on Linux/macOS). Parent directory must exist. File is overwritten if present." },
       },
     },
   },
@@ -215,23 +222,23 @@ const TOOLS: Tool[] = [
 
   {
     name: "bizhawk_save_state",
-    description: "Save the emulator state to a file. BizHawk's savestate API is path-based, not slot-based.",
+    description: "Save the entire emulator state to a file at the given path. State files capture RAM, CPU/PPU/APU registers, mapper state, sound chip state, and timing — a true point-in-time snapshot that bizhawk_load_state can perfectly restore. BizHawk's savestate API is path-based (NOT slot-based like mGBA's). Returns the path written. Compatible only with the exact same ROM and BizHawk core version that produced it.",
     inputSchema: {
       type: "object",
       required: ["path"],
       properties: {
-        path: { type: "string", description: "Absolute path to save the .State file" },
+        path: { type: "string", description: "Absolute filesystem path to write the .State file to (extension is convention, not required). Parent directory must exist. File is overwritten if present." },
       },
     },
   },
   {
     name: "bizhawk_load_state",
-    description: "Load the emulator state from a file. The state must come from the same ROM and BizHawk version.",
+    description: "Restore the emulator from a previously saved .State file at the given path. Counterpart to bizhawk_save_state. The state file must come from the same ROM and same BizHawk core version that produced it — loading an incompatible state usually crashes the core. Useful for snapshot/experiment/restore workflows: save before a risky write, do the experiment, load to undo. Returns the path loaded.",
     inputSchema: {
       type: "object",
       required: ["path"],
       properties: {
-        path: { type: "string", description: "Absolute path to a .State file" },
+        path: { type: "string", description: "Absolute filesystem path to an existing .State file produced by bizhawk_save_state on this same ROM and BizHawk core version." },
       },
     },
   },

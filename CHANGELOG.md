@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Lua scripts changing it, so surfacing it explicitly avoids silent
   reads from the wrong address space.
 
+### Changed
+
+- **Expanded tool descriptions** across the memory r/w family,
+  `bizhawk_frame_advance`, `bizhawk_pause`/`unpause`/`reset`,
+  `bizhawk_screenshot`, and `bizhawk_save_state`/`load_state`. Every
+  parameter now has a `description` field; tool descriptions document
+  endianness, the direct-memory (no MBC/mapper/DMA) write semantics,
+  domain-resolution defaults, frame-latency cost, savestate
+  compatibility constraints, and when to prefer the bulk
+  `_range` variants over multiple typed calls.
+
 ## [0.1.0] - 2026-05-15
 
 Initial public release.
