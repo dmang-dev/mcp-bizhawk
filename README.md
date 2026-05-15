@@ -156,6 +156,8 @@ The server speaks standard MCP over stdio. Run `mcp-bizhawk` and connect any MCP
 
 All memory r/w tools take an optional `domain` parameter — if omitted, the active "current" memory domain is used. Use `bizhawk_list_memory_domains` to discover the names available on the loaded core.
 
+See [`docs/RECIPES.md`](docs/RECIPES.md) for end-to-end examples (RAM hunting on SNES/NES/N64, frame-precise input, snapshot-experiment-restore, cross-system regression testing) and [`CHANGELOG.md`](CHANGELOG.md) for release history.
+
 ### Memory domains by system (cheat sheet)
 
 Names come straight from BizHawk's core implementation. Use `bizhawk_list_memory_domains` to see the exact set for the loaded ROM.
