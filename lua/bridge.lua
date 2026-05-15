@@ -71,8 +71,9 @@ local CAPS = {
     memory_write_u8    = memory and has(memory, "write_u8"),
     memory_write_u16_le = memory and has(memory, "write_u16_le"),
     memory_write_u32_le = memory and has(memory, "write_u32_le"),
-    memory_get_memorydomain_list = memory and has(memory, "getmemorydomainlist"),
-    memory_use_memory_domain     = memory and has(memory, "usememorydomain"),
+    memory_get_memorydomain_list   = memory and has(memory, "getmemorydomainlist"),
+    memory_get_current_memorydomain = memory and has(memory, "getcurrentmemorydomain"),
+    memory_use_memory_domain       = memory and has(memory, "usememorydomain"),
     -- mainmemory (subset of memory, scoped to system main RAM)
     mainmemory_read_u8 = mainmemory and has(mainmemory, "read_u8"),
     -- gameinfo
@@ -108,6 +109,11 @@ local function cmd_get_info(p)
         rom_hash      = CAPS.gameinfo_getromhash and gameinfo.getromhash() or nil,
         framecount    = CAPS.framecount and emu.framecount() or nil,
         memory_domains = memory_domain_list(),
+        -- Which domain is read/written when a memory tool call omits `domain`.
+        -- Useful because BizHawk's "current" domain can drift after savestate
+        -- loads or other Lua scripts changing it underneath us.
+        current_memory_domain = CAPS.memory_get_current_memorydomain
+            and memory.getcurrentmemorydomain() or nil,
         capabilities  = CAPS,
     }
 end

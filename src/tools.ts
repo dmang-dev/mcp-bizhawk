@@ -26,7 +26,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "bizhawk_get_info",
-    description: "Get the loaded ROM name, ROM hash, current frame count, list of available memory domains, and the bridge's capability map (which optional emu/client/savestate/joypad/memory methods this BizHawk build exposes).",
+    description: "Get the loaded ROM name, ROM hash, current frame count, list of available memory domains, the active (default) memory domain used when `domain` is omitted on read/write tool calls, and the bridge's capability map (which optional emu/client/savestate/joypad/memory methods this BizHawk build exposes).",
     inputSchema: { type: "object", properties: {} },
   },
 
@@ -269,6 +269,7 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
           rom_hash?: string;
           framecount?: number;
           memory_domains?: string[];
+          current_memory_domain?: string;
           capabilities?: Record<string, boolean>;
         }>("get_info");
         const lines = [
@@ -279,6 +280,9 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
         if (r.memory_domains?.length) {
           lines.push("");
           lines.push(`Memory domains: ${r.memory_domains.join(", ")}`);
+          if (r.current_memory_domain) {
+            lines.push(`Active domain (used when 'domain' is omitted): ${r.current_memory_domain}`);
+          }
         }
         if (r.capabilities) {
           const missing = Object.entries(r.capabilities).filter(([, v]) => !v).map(([k]) => k);
