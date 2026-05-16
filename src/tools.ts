@@ -234,8 +234,11 @@ const TOOLS: Tool[] = [
   {
     name: "bizhawk_press_buttons",
     description:
-      "PURPOSE: Set the joypad button state for one player for the next emulated frame. " +
-      "USAGE: Use to drive games with input. Each call sets state for ONE frame and then BizHawk's input handling moves on to the next frame's poll, so to HOLD a button across N frames either (a) call this once and follow with bizhawk_frame_advance(count=N) which will see the held state, or (b) call this once per frame for N frames. To release everything, call with all-false or with no keys for the buttons you want released. " +
+      "PURPOSE: Set the joypad button state for one player for EXACTLY the next emulated frame. " +
+      "USAGE: Drive games with input. Each call sets joypad state for ONE frame only — the very next frame BizHawk processes. After that frame, BizHawk's input goes back to whatever the human user is holding (typically nothing). " +
+      "To HOLD a button across N consecutive frames, INTERLEAVE: call bizhawk_press_buttons + bizhawk_frame_advance(count=1) N times in a loop. " +
+      "DO NOT call bizhawk_press_buttons once and then bizhawk_frame_advance(count=N) — only the first of those N frames sees the button; the rest are no-input. Verified empirically against SNES Super Metroid in May 2026: a 60-frame advance after a single press_buttons(Right) moved Samus the same +1 pixel as a 10-frame advance, because frames 2-60 had no input. " +
+      "To release a button mid-hold, just stop calling press_buttons for it; the next frame_advance will see it released. " +
       "BEHAVIOR: Modifies emulator input state for the next frame poll only — no other side effects. Returns an error if the loaded core doesn't expose joypad.set. Button names that aren't valid for the active core are silently ignored by BizHawk (no error). " +
       "RETURNS: Single line 'Set joypad N: BUTTON+BUTTON+...' or '... (all released)' if nothing was pressed. " +
       `\n\nButton names vary per system. Common names across cores: ${VALID_BUTTONS.join(", ")}. Use whatever names the active core understands — if unsure, try a name and check BizHawk's input display, or use bizhawk_get_info to confirm joypad_set is available.`,

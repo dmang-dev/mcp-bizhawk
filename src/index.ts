@@ -36,6 +36,21 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write("[mcp-bizhawk] MCP server ready (stdio)\n");
+
+  // Clean shutdown when the MCP client (Claude Code, Claude Desktop, etc.)
+  // disconnects. Without this, the TCP listener for bridge.lua keeps the
+  // event loop alive after stdin closes — leaving an orphan process bound
+  // to the port. Every subsequent MCP-client restart would then fail with
+  // EADDRINUSE until the orphan is manually killed.
+  const shutdown = (reason: string) => {
+    process.stderr.write(`[mcp-bizhawk] shutting down (${reason})\n`);
+    bh.stop();
+    process.exit(0);
+  };
+  process.stdin.on("end",   () => shutdown("stdin closed"));
+  process.stdin.on("close", () => shutdown("stdin closed"));
+  process.on("SIGINT",  () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 main().catch((err) => {
