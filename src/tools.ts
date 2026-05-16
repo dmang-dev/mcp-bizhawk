@@ -132,16 +132,16 @@ const TOOLS: Tool[] = [
   {
     name: "bizhawk_read_range",
     description:
-      "PURPOSE: Read a contiguous range of bytes from emulator memory and return them as a hex-formatted dump. " +
-      "USAGE: Use whenever you need more than ~4 bytes — one round-trip vs N frame-latency hops compared to looping bizhawk_read8. Maximum 4096 bytes per call (BizHawk per-call serialization limit); for larger reads, batch in 4 KiB chunks. The classic two-snapshot RAM-hunt workflow uses this: snapshot before a known change, snapshot after, diff for matching deltas. Also useful for inspecting unknown structures and for 'capture, modify, restore' write_range workflows. " +
-      "BEHAVIOR: No side effects — pure read. Reads `length` consecutive bytes starting at `address`. Returns an error if domain is unknown, length > 4096, length < 1, or address+length exceeds the domain's size. " +
-      "RETURNS: Header line 'ADDR_HEX [N bytes, DOMAIN]:' followed by space-separated 2-digit uppercase hex bytes.",
+      "PURPOSE: Read a contiguous range of bytes from emulator memory as a hex dump. " +
+      "USAGE: Use for >4 bytes (one round-trip vs N frame-latency hops). Max 4096 bytes/call (BizHawk serialization limit); chunk larger reads in 4 KiB. Powers the two-snapshot RAM-hunt workflow (snapshot before/after a known change, diff for matching deltas). " +
+      "BEHAVIOR: No side effects — pure read. Returns an error if domain is unknown, length is out of 1-4096, or address+length exceeds the domain. " +
+      "RETURNS: 'ADDR_HEX [N bytes, DOMAIN]:' header + space-separated 2-digit uppercase hex bytes.",
     inputSchema: {
       type: "object",
       required: ["address", "length"],
       properties: {
-        address: { type: "integer", minimum: 0, description: "Starting byte offset within the chosen memory domain. 0-based per-domain offset (NOT a system-bus address). The N bytes [address, address+length) are read." },
-        length:  { type: "integer", minimum: 1, maximum: 4096, description: "Number of consecutive bytes to read (1-4096). Hard cap is BizHawk's serialization limit; chunk larger reads yourself." },
+        address: { type: "integer", minimum: 0, description: "Starting byte offset within the chosen memory domain (0-based per-domain, NOT a system-bus address). Reads [address, address+length)." },
+        length:  { type: "integer", minimum: 1, maximum: 4096, description: "Number of bytes to read (1-4096; hard cap is BizHawk's per-call serialization limit)." },
         domain:  { type: "string", description: DOMAIN_PARAM_DESC },
       },
       additionalProperties: false,
