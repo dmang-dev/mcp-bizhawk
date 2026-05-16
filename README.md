@@ -9,9 +9,11 @@ An [MCP](https://modelcontextprotocol.io) server that exposes [BizHawk](https://
 
 One bridge, **many systems**: NES, SNES, Game Boy / GBC / GBA, Sega Master System / Genesis / 32X / Saturn, N64, PlayStation 1, Atari 2600/5200/7800, Lynx, ColecoVision, Intellivision, and more — all through the same MCP tools, with per-system memory domains exposed cleanly.
 
-![Claude driving Super Metroid through mcp-bizhawk](docs/sm-claude-play.gif)
+<p align="center">
+  <img src="docs/sm-claude-play.gif" alt="Claude driving Super Metroid through mcp-bizhawk">
+</p>
 
-*Claude (the agent) drives Samus through the opening of Ceres Station — all input batched through `bizhawk_play_input_sequence`, all motion verified by reading WRAM addresses found via live RAM-hunt. Recording is 2× speed; the actual playback runs at native 60fps emulation. See [`docs/RECIPES.md`](docs/RECIPES.md) and [`docs/SUPER-METROID-ADDRESSES.md`](docs/SUPER-METROID-ADDRESSES.md) for the workflow.*
+<p align="center"><em>Claude (the agent) drives Samus through the opening of Ceres Station — all input batched through <code>bizhawk_play_input_sequence</code>, all motion verified by reading WRAM addresses found via live RAM-hunt. Recording is 2× speed; the actual playback runs at native 60fps emulation. See <a href="docs/RECIPES.md"><code>docs/RECIPES.md</code></a> and <a href="docs/SUPER-METROID-ADDRESSES.md"><code>docs/SUPER-METROID-ADDRESSES.md</code></a> for the workflow.</em></p>
 
 ## How it works
 
