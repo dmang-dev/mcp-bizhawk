@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-15
+
+Bug fixes discovered during a live Super Metroid RAM-hunt session.
+
+### Fixed
+
+- **Orphan process on MCP client restart.** When the MCP client (Claude
+  Code, Claude Desktop, etc.) exited, our stdio handshake closed but
+  the TCP listener for `bridge.lua` kept the event loop alive — leaving
+  an orphaned `node` process bound to port 8766. Every subsequent
+  client restart then failed with `EADDRINUSE` until the orphan was
+  manually killed. Added shutdown handlers in `src/index.ts` that
+  listen for stdin close, `SIGINT`, and `SIGTERM` and call `bh.stop()`
+  to release the port.
+- **`bizhawk_press_buttons` description was misdocumented.** Previous
+  text claimed `press_buttons + frame_advance(count=N)` would hold the
+  button for all N frames. Empirically false: BizHawk's `joypad.set`
+  is single-frame, so frames 2-N of the advance see no input.
+  Confirmed on Super Metroid — a 60-frame advance after one
+  `press_buttons(Right)` moved Samus the same +1 pixel as a 10-frame
+  advance, proving frames 2-60 had no input held. Rewrote USAGE to
+  mandate INTERLEAVED `press_buttons + frame_advance(1)` for
+  multi-frame holds.
+
+### Added
+
+- **`docs/SUPER-METROID-ADDRESSES.md`** — WRAM address map for Super
+  Metroid (Japan, USA), discovered live via `mcp-bizhawk`. Covers the
+  Samus stats block (HP at `0x09C2` verified, missiles/supers/PBs/
+  reserves at canonical offsets) and Samus position
+  (`0x0AF6`-`0x0AFC`). Includes snapshot-diff hunt recipe and
+  snap-rollback experimentation pattern.
+
 ## [0.1.1] - 2026-05-15
 
 Tool description quality pass — written to Glama's Tool Definition Quality
@@ -96,6 +129,7 @@ Initial public release.
   encoder serializes it as a clean array rather than an object with
   string keys.
 
-[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.2
 [0.1.1]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.1
 [0.1.0]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.0
