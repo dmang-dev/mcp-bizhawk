@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-15
+
+Agent-vision pass — inline screenshots during input playback, so agents
+driving the bridge can SEE the trajectory of an input batch in the
+same tool call that runs it.
+
+### Added
+
+- **`screenshot_every` parameter on `bizhawk_play_input_sequence`** —
+  if set, the bridge captures a PNG every N frames during playback
+  (plus one extra at the final frame). The Node side reads each PNG
+  back from disk, base64-encodes, and returns the screenshots as
+  inline `image` content blocks in the MCP tool response. The agent
+  sees Samus's whole trajectory in one round-trip — no separate
+  screenshot/read calls, no temp-file management.
+- **`screenshot_dir` and `screenshot_prefix` parameters** — control
+  where screenshots land on disk and what they're named. Defaults:
+  `C:/temp` and `obs`. Files are named `<prefix>-NNNN.png` where NNNN
+  is the zero-padded frame offset within the batch.
+
+### Why this matters for agent-driven play
+
+Without inline observation, an agent playing the game has to:
+1. Send an input batch
+2. Wait for it to finish
+3. Call screenshot to a path
+4. Read the PNG back to view it
+5. Decide next move
+6. Send next batch
+
+Each "look" between batches is multiple tool calls AND lets the bridge
+idle-tick the game forward during the agent's thinking time (which we
+empirically measured at ~1800 frames lost per 30 seconds of agent
+think-time during the Super Metroid play session in v0.1.3). With
+`screenshot_every` baked into the play call itself, observation
+happens DURING the play (at exact frame offsets), and the agent sees
+multiple snapshots inline in the same response. No drift, full
+observability, one round-trip.
+
+### Empirical validation
+
+Tested against Super Metroid Ceres opening: a 200-frame batched play
+with `screenshot_every: 60` returned 4 PNGs inline showing Samus's
+exact trajectory (walking right, falling mid-air, landing, walking
+right again). All visible in one tool response without any follow-up
+read calls.
+
 ## [0.1.3] - 2026-05-15
 
 Batched input-playback RPC delivers a 5× wall-clock speedup for multi-frame
@@ -35,6 +82,7 @@ bridge instead of a 12-fps stuttery crawl.
   `final_framecount` for verification.
 
 [Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.3...HEAD
+[0.1.4]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.4
 [0.1.3]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.3
 
 ## [0.1.2] - 2026-05-15

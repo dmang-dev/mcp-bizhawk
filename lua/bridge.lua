@@ -210,24 +210,51 @@ end
 -- (and the heartbeat) are stalled until the batch finishes. For
 -- responsiveness, callers should chunk long sequences into multiple
 -- play_input_sequence calls of a few hundred frames each.
+--
+-- Optional observation params (since v0.1.4):
+--   p.screenshot_every  — capture a PNG every N frames (also captures the
+--                         final frame regardless of remainder). Requires
+--                         client.screenshot to be available on this build.
+--   p.screenshot_dir    — directory for PNGs (default: C:/temp on Windows,
+--                         /tmp elsewhere; caller should ensure it exists)
+--   p.screenshot_prefix — filename prefix (default: "obs")
 local function cmd_play_input_sequence(p)
     if not CAPS.joypad_set    then error("joypad.set not available") end
     if not CAPS.frameadvance  then error("emu.frameadvance not available") end
     local frames = assert(p.frames, "frames required (array of {buttons, player?} objects)")
     if type(frames) ~= "table" then error("frames must be an array") end
 
+    local screenshot_every  = p.screenshot_every
+    local screenshot_dir    = p.screenshot_dir    or "C:/temp"
+    local screenshot_prefix = p.screenshot_prefix or "obs"
+    local observations = {}
+    if screenshot_every and not CAPS.screenshot then
+        error("screenshot_every requested but client.screenshot is not available on this build")
+    end
+
     local count = 0
+    local total = #frames
     for i, frame in ipairs(frames) do
         local buttons = (type(frame) == "table" and frame.buttons) or {}
         local player  = (type(frame) == "table" and frame.player) or 1
         joypad.set(buttons, player)
         emu.frameadvance()
         count = count + 1
+
+        if screenshot_every and (count % screenshot_every == 0 or count == total) then
+            local path = string.format("%s/%s-%04d.png", screenshot_dir, screenshot_prefix, count)
+            client.screenshot(path)
+            table.insert(observations, {
+                frame_offset = count,
+                path = path,
+            })
+        end
     end
 
     return {
         played = count,
         final_framecount = CAPS.framecount and emu.framecount() or nil,
+        observations = observations,
     }
 end
 

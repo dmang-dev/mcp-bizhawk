@@ -264,10 +264,11 @@ const TOOLS: Tool[] = [
   {
     name: "bizhawk_play_input_sequence",
     description:
-      "PURPOSE: Play a pre-built sequence of per-frame joypad inputs back-to-back, advancing one frame per element, ENTIRELY SERVER-SIDE in a single bridge round-trip. " +
-      "USAGE: Use whenever you have ≥10 frames of inputs to play in order — TAS movie playback, scripted multi-frame sequences, AI-search of input patterns. ONE bridge round-trip ships N frames instead of the 2N round-trips you'd pay looping bizhawk_press_buttons + bizhawk_frame_advance(1) from the client. Net effect: replay runs at near-native emulation speed (~60 fps) instead of the ~12 fps client-loop ceiling. For sequences of 1-9 frames, the loop is fine and doesn't need this. For sequences over ~200 frames, CHUNK into multiple calls of ~200 frames each — the bridge stalls all other RPCs during a sequence (no interleaving, no heartbeat), so a single 10,000-frame call would freeze inspection for ~3 minutes. " +
-      "BEHAVIOR: For each `frames` element, calls joypad.set with that frame's buttons then emu.frameadvance — exactly mirroring what looping press_buttons + frame_advance(1) does, just without the per-frame round-trip overhead. The bridge's main poll loop is BLOCKED for the duration of the call; no other tool calls run until the sequence finishes (or fails). Returns an error if the loaded core doesn't expose joypad.set or emu.frameadvance, if `frames` isn't an array, or if any element isn't an object. Button names that aren't valid for the active core are silently ignored by BizHawk (no error) per the standard joypad.set semantics. " +
-      "RETURNS: JSON-style 'Played N frames. Final framecount: M' line.",
+      "PURPOSE: Play a pre-built sequence of per-frame joypad inputs back-to-back, advancing one frame per element, ENTIRELY SERVER-SIDE in a single bridge round-trip. Optionally captures screenshots at fixed frame intervals during the play and returns them inline so the agent can see what happened without separate read tool calls. " +
+      "USAGE: Use whenever you have ≥10 frames of inputs to play in order — TAS movie playback, scripted multi-frame sequences, AI-search of input patterns, agent-driven gameplay. ONE bridge round-trip ships N frames instead of the 2N round-trips you'd pay looping bizhawk_press_buttons + bizhawk_frame_advance(1). For sequences of 1-9 frames, the loop is fine. For sequences over ~200 frames, CHUNK into multiple calls. " +
+      "FOR AGENT-DRIVEN PLAY: pass `screenshot_every` (e.g. 60 to capture every 1 second of game time) so screenshots come back inline with the play result — you immediately see Samus's trajectory across the batch instead of having to call screenshot/read separately afterward. This also avoids the 'idle-tick drift' problem where the bridge advances the game while you're composing the next batch: by including observations IN the play call, you see the actual state at exit. " +
+      "BEHAVIOR: For each `frames` element, calls joypad.set with that frame's buttons then emu.frameadvance. The bridge's main poll loop is BLOCKED for the duration of the call (no other RPCs, no heartbeat) until the sequence finishes or fails. With `screenshot_every`, each captured screenshot adds ~1 frame of wall-clock per shot (client.screenshot blocks briefly), so capturing every 5 frames doubles batch time — capturing every 30-60 frames is the sane range. Screenshots are written to `screenshot_dir` (default C:/temp) with names like `<prefix>-NNNN.png` where NNNN is the frame offset within the batch. The Node side reads each PNG back from disk, base64-encodes it, and returns it as an inline `image` content block in the tool response. Returns an error if joypad.set or emu.frameadvance is missing, if `frames` isn't an array, if `screenshot_every` is set but client.screenshot isn't available, or if `screenshot_dir` isn't writable. " +
+      "RETURNS: A text line 'Played N frames. Final framecount: M. Captured K observations.' followed by K inline image content blocks (PNG screenshots, one per observation). The text line names each observation's frame_offset so the agent can correlate image-N with the game frame it captures.",
     inputSchema: {
       type: "object",
       required: ["frames"],
@@ -297,6 +298,22 @@ const TOOLS: Tool[] = [
               },
             },
           },
+        },
+        screenshot_every: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Optional. If set, capture a PNG screenshot every N frames during playback (and one extra at the final frame regardless of remainder). Each screenshot costs ~1 wall-clock frame for client.screenshot, so 60 (≈1 sec of game time) is a good default — captures meaningful state changes without doubling batch latency. Omit to skip observation entirely (just play). Requires the loaded core to expose client.screenshot (check capabilities.screenshot in bizhawk_get_info).",
+        },
+        screenshot_dir: {
+          type: "string",
+          description:
+            "Optional. Directory to write screenshot PNGs into when `screenshot_every` is set. Default: C:/temp. Must exist and be writable. Files are named `<prefix>-NNNN.png` where NNNN is the frame offset within the batch (zero-padded to 4 digits).",
+        },
+        screenshot_prefix: {
+          type: "string",
+          description:
+            "Optional. Filename prefix for screenshots when `screenshot_every` is set. Default: 'obs'. Useful for tagging screenshots from different batches in the same directory.",
         },
       },
       additionalProperties: false,
@@ -497,8 +514,47 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
       }
 
       case "bizhawk_play_input_sequence": {
-        const r = await bh.call<{ played: number; final_framecount?: number }>("play_input_sequence", { frames: p.frames });
-        return ok(`Played ${r.played} frames. Final framecount: ${r.final_framecount ?? "(unavailable)"}`);
+        const params: Record<string, unknown> = { frames: p.frames };
+        if (p.screenshot_every  !== undefined) params.screenshot_every  = p.screenshot_every;
+        if (p.screenshot_dir    !== undefined) params.screenshot_dir    = p.screenshot_dir;
+        if (p.screenshot_prefix !== undefined) params.screenshot_prefix = p.screenshot_prefix;
+        const r = await bh.call<{
+          played: number;
+          final_framecount?: number;
+          observations?: { frame_offset: number; path: string }[];
+        }>("play_input_sequence", params);
+
+        const obs = r.observations ?? [];
+        const summary =
+          `Played ${r.played} frames. Final framecount: ${r.final_framecount ?? "(unavailable)"}. ` +
+          `Captured ${obs.length} observations` +
+          (obs.length > 0
+            ? ` at frame offsets ${obs.map(o => o.frame_offset).join(", ")}.`
+            : ".");
+
+        // Build the multi-content response: text summary + one inline image
+        // block per observation. We read the PNG from disk (Lua already wrote
+        // it) and base64-encode for MCP transport.
+        const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
+          { type: "text", text: summary },
+        ];
+        for (const o of obs) {
+          try {
+            const fs = await import("node:fs");
+            const bytes = fs.readFileSync(o.path);
+            content.push({
+              type: "image",
+              data: bytes.toString("base64"),
+              mimeType: "image/png",
+            });
+          } catch (err) {
+            content.push({
+              type: "text",
+              text: `(failed to read observation at frame ${o.frame_offset} from ${o.path}: ${(err as Error).message})`,
+            });
+          }
+        }
+        return { content };
       }
 
       case "bizhawk_pause":         await bh.call("pause");          return ok("Emulation paused");
