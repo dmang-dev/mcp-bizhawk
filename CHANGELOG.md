@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-15
+
+Batched input-playback RPC delivers a 5× wall-clock speedup for multi-frame
+input sequences — enabling near-native-speed `.bk2` movie replay through the
+bridge instead of a 12-fps stuttery crawl.
+
+### Added
+
+- **`bizhawk_play_input_sequence`** — new MCP tool that takes a `frames`
+  array (each element is `{buttons, player}`) and runs `joypad.set +
+  emu.frameadvance` per element ENTIRELY SERVER-SIDE in a single bridge
+  round-trip. Empirically validated against a 1242-frame Super Metroid
+  `.bk2` movie: per-frame mode (looping `press_buttons` +
+  `frame_advance(1)` from the client) took 103.3 seconds at 12 fps
+  wall-clock; batched mode (one RPC per 200 frames) took **20.9 seconds
+  at 59.4 fps** — within 1% of native 60fps emulation speed.
+- **`play_input_sequence` Lua handler** in `bridge.lua` — the batch
+  driver. Iterates `frames`, calls `joypad.set` then `emu.frameadvance`
+  per element, returns `{played, final_framecount}`. Blocks the bridge's
+  outer poll loop for the duration of the call (no interleaving with
+  other RPCs, no heartbeat), so callers should chunk long sequences
+  into batches of ≤200 frames to keep the bridge responsive.
+- **`scripts/replay-bk2.cjs` now uses batched mode by default** — chunks
+  the parsed input log into 200-frame batches and ships each via
+  `play_input_sequence`. The per-batch progress log now reports
+  `final_framecount` for verification.
+
+[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.3
+
 ## [0.1.2] - 2026-05-15
 
 Bug fixes discovered during a live Super Metroid RAM-hunt session.
@@ -129,7 +159,6 @@ Initial public release.
   encoder serializes it as a clean array rather than an object with
   string keys.
 
-[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.2...HEAD
 [0.1.2]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.2
 [0.1.1]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.1
 [0.1.0]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.0

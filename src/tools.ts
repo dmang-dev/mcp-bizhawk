@@ -261,6 +261,47 @@ const TOOLS: Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "bizhawk_play_input_sequence",
+    description:
+      "PURPOSE: Play a pre-built sequence of per-frame joypad inputs back-to-back, advancing one frame per element, ENTIRELY SERVER-SIDE in a single bridge round-trip. " +
+      "USAGE: Use whenever you have ≥10 frames of inputs to play in order — TAS movie playback, scripted multi-frame sequences, AI-search of input patterns. ONE bridge round-trip ships N frames instead of the 2N round-trips you'd pay looping bizhawk_press_buttons + bizhawk_frame_advance(1) from the client. Net effect: replay runs at near-native emulation speed (~60 fps) instead of the ~12 fps client-loop ceiling. For sequences of 1-9 frames, the loop is fine and doesn't need this. For sequences over ~200 frames, CHUNK into multiple calls of ~200 frames each — the bridge stalls all other RPCs during a sequence (no interleaving, no heartbeat), so a single 10,000-frame call would freeze inspection for ~3 minutes. " +
+      "BEHAVIOR: For each `frames` element, calls joypad.set with that frame's buttons then emu.frameadvance — exactly mirroring what looping press_buttons + frame_advance(1) does, just without the per-frame round-trip overhead. The bridge's main poll loop is BLOCKED for the duration of the call; no other tool calls run until the sequence finishes (or fails). Returns an error if the loaded core doesn't expose joypad.set or emu.frameadvance, if `frames` isn't an array, or if any element isn't an object. Button names that aren't valid for the active core are silently ignored by BizHawk (no error) per the standard joypad.set semantics. " +
+      "RETURNS: JSON-style 'Played N frames. Final framecount: M' line.",
+    inputSchema: {
+      type: "object",
+      required: ["frames"],
+      properties: {
+        frames: {
+          type: "array",
+          description:
+            "Array of per-frame input objects. Each element describes ONE emulated frame: " +
+            "`{\"buttons\": {\"Right\": true, ...}, \"player\": 1}`. Empty `buttons` (or empty object) = no input on that frame. " +
+            "`player` defaults to 1 if omitted. Array order = frame playback order. " +
+            "Chunk longer sequences across multiple calls (≤200 frames each is a reasonable upper bound) to keep the bridge responsive.",
+          minItems: 1,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              buttons: {
+                type: "object",
+                description: "Map of button name → pressed (boolean). Same semantics as bizhawk_press_buttons.buttons. Omit or empty = no input on this frame.",
+                additionalProperties: { type: "boolean" },
+              },
+              player: {
+                type: "integer",
+                minimum: 1,
+                default: 1,
+                description: "Player number (1-based). Default 1.",
+              },
+            },
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 
   // ── Emulator control ───────────────────────────────────────────────────
 
@@ -453,6 +494,11 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
         const pressed = Object.entries(p.buttons as Record<string, boolean>)
           .filter(([, v]) => v).map(([k]) => k);
         return ok(`Set joypad ${p.player ?? 1}: ${pressed.length ? pressed.join("+") : "(all released)"}`);
+      }
+
+      case "bizhawk_play_input_sequence": {
+        const r = await bh.call<{ played: number; final_framecount?: number }>("play_input_sequence", { frames: p.frames });
+        return ok(`Played ${r.played} frames. Final framecount: ${r.final_framecount ?? "(unavailable)"}`);
       }
 
       case "bizhawk_pause":         await bh.call("pause");          return ok("Emulation paused");

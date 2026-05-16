@@ -310,19 +310,30 @@ async function main() {
     }
   }
 
-  console.log("=== starting playback ===");
+  // Chunk size for batched play_input_sequence. ~200 frames per call keeps
+  // each batch's wall-clock under ~3.5s at native 60fps emulation, which
+  // means the bridge isn't blocked from other RPCs for too long and the
+  // progress logs print frequently enough to look responsive. Larger chunks
+  // = fewer round-trips but longer per-batch freeze; smaller = more
+  // responsive but closer to the per-frame-RPC overhead of the legacy mode.
+  const CHUNK = 200;
+  console.log(`=== starting playback (batched, ${CHUNK} frames/RPC) ===`);
   const t0 = Date.now();
-  for (let i = 0; i < playFrames; i++) {
-    const buttons = filterPressed(frames[i]);
-    await bh.call("press_buttons", { buttons, player: 1 });
-    await bh.call("frame_advance", { count: 1 });
-
-    if ((i + 1) % 60 === 0 || i === playFrames - 1) {
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-      const rate = ((i + 1) / (Date.now() - t0) * 1000).toFixed(1);
-      const pressedNames = Object.keys(buttons).filter(k => buttons[k]).join("+") || "(none)";
-      console.log(`  frame ${i + 1}/${playFrames}  @${rate}fps wall-clock  elapsed=${elapsed}s  last=${pressedNames}`);
+  let played = 0;
+  while (played < playFrames) {
+    const end = Math.min(played + CHUNK, playFrames);
+    const batch = [];
+    for (let i = played; i < end; i++) {
+      batch.push({ buttons: filterPressed(frames[i]), player: 1 });
     }
+    const result = await bh.call("play_input_sequence", { frames: batch });
+    played = end;
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    const rate = (played / (Date.now() - t0) * 1000).toFixed(1);
+    const lastB = batch[batch.length - 1].buttons;
+    const lastPressed = Object.keys(lastB).filter(k => lastB[k]).join("+") || "(none)";
+    console.log(`  played ${played}/${playFrames}  @${rate}fps wall-clock  elapsed=${elapsed}s  final_fc=${result.final_framecount}  last=${lastPressed}`);
   }
 
   const totalSec = ((Date.now() - t0) / 1000).toFixed(1);

@@ -147,9 +147,11 @@ Each port runs in its own BizHawk session pointed at this MCP server — restart
 
 > "I have a short BizHawk .bk2 movie. Can I replay it through the mcp bridge to see Samus do the same thing my recording captured?"
 
-Yes — there's a reference tool in `scripts/replay-bk2.cjs` that does exactly this. It parses the .bk2, optionally restores the embedded starting savestate, and then hammers `press_buttons + frame_advance(1)` pairs through the bridge for each frame in the movie's input log. Expect roughly **12 fps wall-clock** (vs 60 fps native emulation) because each frame costs 2 bridge round-trips of ~40 ms each.
+Yes — there's a reference tool in `scripts/replay-bk2.cjs` that does exactly this. It parses the .bk2, optionally restores the embedded starting savestate, and then plays back the input log via the `bizhawk_play_input_sequence` batched RPC.
 
-This is fundamentally not how you'd want to author or polish a real TAS — BizHawk's built-in TAStudio is faster and frame-perfect. It IS a clean demo that mcp tools can faithfully drive any input sequence end-to-end, and a way to programmatically replay short captured behaviors.
+Since 0.1.3 the tool uses **batched mode**: it ships 200 frames of input per single bridge round-trip, and `bridge.lua` runs the `joypad.set + emu.frameadvance` loop entirely server-side. Empirically this plays back at **~59 fps wall-clock** — essentially native 60-fps emulation speed. A 1242-frame movie replays in ~21 seconds; the same movie in the old per-frame mode (`press_buttons + frame_advance(1)` looping from the client) took 103 seconds at 12 fps.
+
+This is still not the right tool for authoring or polishing a real TAS — BizHawk's built-in TAStudio is faster (no bridge at all) and has a frame-perfect editor. It IS a clean way to programmatically replay any captured input sequence through the bridge for inspection, instrumentation, or to drive deterministic re-runs from a Claude session.
 
 ### Setup
 

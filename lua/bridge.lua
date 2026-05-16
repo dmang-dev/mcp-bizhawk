@@ -203,6 +203,34 @@ local function cmd_press_buttons(p)
     return true
 end
 
+-- Batched input playback. Takes a list of per-frame inputs and runs them
+-- entirely server-side — one bridge round-trip per BATCH instead of per
+-- frame. Each frame entry is `{ buttons = {A=true,...}, player = 1 }`.
+-- The bridge does NOT poll its outer loop during this call, so other RPCs
+-- (and the heartbeat) are stalled until the batch finishes. For
+-- responsiveness, callers should chunk long sequences into multiple
+-- play_input_sequence calls of a few hundred frames each.
+local function cmd_play_input_sequence(p)
+    if not CAPS.joypad_set    then error("joypad.set not available") end
+    if not CAPS.frameadvance  then error("emu.frameadvance not available") end
+    local frames = assert(p.frames, "frames required (array of {buttons, player?} objects)")
+    if type(frames) ~= "table" then error("frames must be an array") end
+
+    local count = 0
+    for i, frame in ipairs(frames) do
+        local buttons = (type(frame) == "table" and frame.buttons) or {}
+        local player  = (type(frame) == "table" and frame.player) or 1
+        joypad.set(buttons, player)
+        emu.frameadvance()
+        count = count + 1
+    end
+
+    return {
+        played = count,
+        final_framecount = CAPS.framecount and emu.framecount() or nil,
+    }
+end
+
 local function cmd_pause(p)
     if not CAPS.pause then error("emu.pause not available") end
     emu.pause(); return true
@@ -257,6 +285,7 @@ local HANDLERS = {
     write_range          = cmd_write_range,
     list_memory_domains  = cmd_list_memory_domains,
     press_buttons        = cmd_press_buttons,
+    play_input_sequence  = cmd_play_input_sequence,
     pause                = cmd_pause,
     unpause              = cmd_unpause,
     frame_advance        = cmd_frame_advance,
