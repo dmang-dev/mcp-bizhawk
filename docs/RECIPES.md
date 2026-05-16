@@ -143,6 +143,82 @@ Each port runs in its own BizHawk session pointed at this MCP server — restart
 
 ---
 
+## 9. Replay a BizHawk `.bk2` TAS movie through mcp
+
+> "I have a short BizHawk .bk2 movie. Can I replay it through the mcp bridge to see Samus do the same thing my recording captured?"
+
+Yes — there's a reference tool in `scripts/replay-bk2.cjs` that does exactly this. It parses the .bk2, optionally restores the embedded starting savestate, and then hammers `press_buttons + frame_advance(1)` pairs through the bridge for each frame in the movie's input log. Expect roughly **12 fps wall-clock** (vs 60 fps native emulation) because each frame costs 2 bridge round-trips of ~40 ms each.
+
+This is fundamentally not how you'd want to author or polish a real TAS — BizHawk's built-in TAStudio is faster and frame-perfect. It IS a clean demo that mcp tools can faithfully drive any input sequence end-to-end, and a way to programmatically replay short captured behaviors.
+
+### Setup
+
+The replay tool needs to BE the bridge during playback (so it can hammer tool calls directly without going through MCP stdio + Claude). That means it competes with `mcp-bizhawk` for port 8766.
+
+```bash
+# 1. Find and kill the current mcp-bizhawk process so the port frees up.
+#    (claude mcp list shows it; netstat -ano | grep :8766 finds the PID.)
+taskkill /F /PID <mcp-bizhawk-pid>
+
+# 2. Start the replay (it'll bind 8766 and wait for bridge.lua to connect).
+node scripts/replay-bk2.cjs C:/path/to/your.bk2
+
+# 3. Relaunch BizHawk with the standard flags so bridge.lua reconnects
+#    to our script. (Stopping and restarting bridge.lua alone doesn't
+#    recover the broken socket — needs a full BizHawk restart.)
+EmuHawk.exe --socket_ip=127.0.0.1 --socket_port=8766 --lua=lua/bridge.lua your-rom.smc
+```
+
+The script then loads any embedded starting state from the .bk2, plays back every frame's input, and exits. After it exits, your next Claude Code session will respawn `mcp-bizhawk` and tools come back.
+
+### Critical caveat: core mismatch silently breaks state restore
+
+The .bk2 header records the exact BizHawk core that authored the movie (e.g. `Core BSNESv115+`). If your live BizHawk session is running a different core (e.g. `BSNES` not `BSNESv115+`, or `Snes9x`), `savestate.load` will silently reject the embedded state. The replay still runs but every input lands on whatever state BizHawk happens to be in — usually the title screen — producing no visible motion.
+
+The replay tool now verifies the post-load framecount and ROM name to surface the mismatch loudly, but you should also pre-check by reading the .bk2 header (unzip + `Header.txt`) and matching BizHawk's **Config → Cores → SNES** to it before recording or replaying.
+
+### Override the starting state
+
+If the embedded state won't load (core mismatch, version drift, corruption), use `--state PATH` to supply a known-good savestate:
+
+```bash
+# Use a BizHawk QuickSave you made under the current core.
+# QuickSaves live in <BizHawk>/SNES/State/<ROM>.<CORE>.QuickSave<N>.State
+node scripts/replay-bk2.cjs movie.bk2 \
+  --state "I:/BizHawk-2.11.1-win-x64/SNES/State/Super Metroid (Japan, USA) (En,Ja).BSNESv115+.QuickSave1.State"
+```
+
+Or `--no-state` to skip loading entirely and replay against whatever state BizHawk is currently in (useful if you've already positioned things by hand):
+
+```bash
+node scripts/replay-bk2.cjs movie.bk2 --no-state
+```
+
+### What a successful run looks like
+
+The script prints per-60-frame progress with the input being held at that checkpoint:
+
+```
+Bridge ready. Pinging...
+  pong
+Loading starting state from ...QuickSave1.State...
+  load_state RPC returned without error.
+  post-load framecount: 19847
+  post-load ROM: Super Metroid (Japan, USA) (En,Ja)
+
+=== starting playback ===
+  frame 60/1242  @12.1fps wall-clock  elapsed=5.0s  last=Right
+  frame 120/1242  @12.0fps wall-clock  elapsed=10.0s  last=Down+Left
+  ...
+  frame 1242/1242  @12.0fps wall-clock  elapsed=103.5s  last=(none)
+
+=== done. 1242 frames in 103.5s (avg 12.0 fps wall-clock) ===
+```
+
+If you see `post-load framecount: 0` or some value far from where you'd expect, the savestate didn't apply — fix the core mismatch and rerun.
+
+---
+
 ## Tips for Claude prompts
 
 - **Always start with `bizhawk_get_info`** so Claude knows which system and which memory domains are live before reasoning about addresses.
