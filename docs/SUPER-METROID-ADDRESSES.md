@@ -32,7 +32,30 @@ All addresses are **offsets into BizHawk's `WRAM` memory domain** — equivalent
 | `0x0AFA` | u16 | Samus Y position (pixels) | Canonical TAS layout |
 | `0x0AFC` | u16 | Samus Y position (sub-pixels) | Fixed-point sub-pixel fraction |
 
-Coordinates are **room-local**, NOT world-absolute. They reset each time Samus enters a new room. To track world position, also need room ID (TBD: not yet hunted).
+Coordinates are **room-local**, NOT world-absolute. They reset each time Samus enters a new room. Pair with `0x079B` (room pointer) and `0x079F` (area code) below to disambiguate world position.
+
+## Game-state region (canonical-verified)
+
+These three were inferred from canonical TAS sources, then cross-checked against live values that matched the expected Ceres-prologue state. Strong indirect confirmation, but they haven't been directly write-tested or change-triggered.
+
+| Offset | Width | Field | Live value (Ceres) | Why we trust it |
+|---|---|---|---|---|
+| `0x079B` | u16 | **Current room pointer** | `0xDF45` | Falls in the `0xDF__` SMILE-pointer range that maps to Ceres rooms |
+| `0x079F` | u16 | **Current area code** | `0x0006` | `6` is the canonical Ceres area code (Crateria=0, Brinstar=1, Norfair=2, Wrecked Ship=3, Maridia=4, Tourian=5, **Ceres=6**, Debug=7) |
+| `0x0998` | u16 | **Game state** | `0x0008` | `8` is the canonical "main gameplay (Samus controllable)" state; matches the live screenshot showing Samus stood on the Ceres platform |
+
+**Ceres prologue gotcha**: the SM pause menu is intentionally disabled in Ceres Station — pressing START doesn't bring up the inventory, so you can't verify `0x0998` by toggling between gameplay (`0x08`) and paused (`0x0F`) here. You'd have to verify after Samus reaches Crateria, where pause becomes available.
+
+## Inventory bitfields (canonical-inferred)
+
+Not yet write-verified — Ceres-prologue Samus appears to use a different inventory tracking mechanism (the values were unexpectedly zero despite Samus visibly having items in the cutscenes). Verify these in main-game Crateria after Samus picks up her first morph ball / missile pack.
+
+| Offset | Width | Field |
+|---|---|---|
+| `0x09A2` | u16 | Equipped items bitfield (toggleable subset of collected items) |
+| `0x09A4` | u16 | Collected items bitfield (morph ball, bombs, varia, gravity, etc.) |
+| `0x09A6` | u16 | Collected beams bitfield (charge, ice, wave, spazer, plasma) |
+| `0x09A8` | u16 | Equipped beams bitfield |
 
 ## Recipes
 
@@ -70,11 +93,11 @@ bizhawk_read16(0x0AF6)                 # check new X
 
 ## Open hunts
 
-Not yet pinned down — opportunities for follow-up sessions:
+Still on the wishlist for a Crateria session (where the pause menu works and Samus's inventory is normal):
 
-- **Room ID** — likely at `0x07BD` (region) and `0x079B` (room within region) per TAS lore. Verify by entering a door and watching which u16 changes.
-- **Item bitfield** — which items Samus has equipped (morph ball, bombs, charge beam, etc.). Canonical at `0x09A2`/`0x09A4` (collected/equipped).
-- **Game state** — title vs gameplay vs pause vs cutscene. Canonical at `0x0998`.
-- **Game timer** — in-game frame counter (excludes pause). Canonical somewhere in the `0x09xx` block.
+- **Inventory bitfield verification** — confirm `0x09A2`/`0x09A4`/`0x09A6`/`0x09A8` track item collection properly once Samus is in Crateria with items. Suggested approach: pre-pickup snapshot → walk to morph ball → post-pickup snapshot → diff for u16 that gained a bit.
+- **Game state verification** — confirm `0x0998` flips between `0x08` (gameplay) and `0x0F` (paused) when pressing START outside Ceres.
+- **Game timer** — in-game frame counter (excludes pause). Canonical somewhere in the `0x09xx` block. Snapshot, frame_advance(N), snapshot, look for u16 that incremented by exactly N.
+- **Door transition state** — `0x0998` value during a door scroll (should be `0x09` per TAS lore). Verify by snapshotting mid-door-transition (might need to pause emulator on a specific frame).
 
-Each is a 5-minute snapshot-diff hunt with `mcp-bizhawk`, following the recipe above.
+Each is a 5-minute snapshot-diff hunt with `mcp-bizhawk`, following the recipes above.
