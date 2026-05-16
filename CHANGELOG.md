@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-15
+
+Tier 3 of agent-vision: labeled memory observations alongside screenshots,
+and stop-on-memory-change for goal-driven play that terminates early
+instead of running fixed-length batches past the goal.
+
+### Added
+
+- **`observe_memory` parameter on `bizhawk_play_input_sequence`** —
+  array of `{name, domain, address, width}` reads to perform at each
+  observation point (alongside any screenshot from `screenshot_every`).
+  Each observation in the result includes a `memory: {name: value, ...}`
+  field with the labeled readings. Width is `"u8"` | `"u16"` | `"u32"`.
+  Lets the agent see screenshot + Samus's HP + X/Y + room ID all in one
+  observation block instead of having to make follow-up reads.
+- **`stop_on_memory_change` parameter on `bizhawk_play_input_sequence`** —
+  `{domain, address, width}`. The bridge reads the value before the
+  first frame, re-reads after every frame, and aborts the sequence the
+  moment it changes. Result includes `stopped_early: true` and
+  `stop_reason: 'memory_changed'`. A final observation is always
+  captured at the stop frame regardless of the normal cadence. Killer
+  use case: watch the room ID — Samus walks through a door, room ID
+  changes, play stops at the exact transition frame.
+
+### Why this matters
+
+With Tier 2 (v0.1.4) the agent could SEE Samus's trajectory inline.
+With Tier 3 the agent can ALSO see numerical state at each
+observation point (HP, position, room ID, etc.) AND have the bridge
+auto-terminate when a goal is reached, instead of overshooting by 100
+frames because the play batch was sized too long. The pattern:
+
+```
+play 200 frames with:
+  screenshot_every: 60
+  observe_memory: [{name:"x",domain:"WRAM",address:0xAF6,width:"u16"},
+                   {name:"room",domain:"WRAM",address:0x79B,width:"u16"}]
+  stop_on_memory_change: {domain:"WRAM",address:0x79B,width:"u16"}
+→ stopped at frame 134, screenshots show approach to door,
+  per-obs x position confirms forward progress, final obs shows
+  new room ID
+```
+
+That's a complete "walk forward until I reach the next room"
+abstraction in one tool call.
+
+[0.1.5]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.5
+
 ## [0.1.4] - 2026-05-15
 
 Agent-vision pass — inline screenshots during input playback, so agents
@@ -81,7 +129,7 @@ bridge instead of a 12-fps stuttery crawl.
   `play_input_sequence`. The per-batch progress log now reports
   `final_framecount` for verification.
 
-[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.5...HEAD
 [0.1.4]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.4
 [0.1.3]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.3
 

@@ -218,6 +218,42 @@ end
 --   p.screenshot_dir    — directory for PNGs (default: C:/temp on Windows,
 --                         /tmp elsewhere; caller should ensure it exists)
 --   p.screenshot_prefix — filename prefix (default: "obs")
+--
+-- Optional observation params (since v0.1.5):
+--   p.observe_memory    — array of {name, domain, address, width} reads
+--                         to perform at each observation point. width is
+--                         "u8" | "u16" | "u32". Results land in each
+--                         observation as `memory = { name = value, ... }`.
+--   p.stop_on_memory_change — {domain, address, width} — record this
+--                         value at the start, abort play the moment it
+--                         changes. Result includes stopped_early=true and
+--                         stop_reason='memory_changed'. The final
+--                         observation (if screenshot/memory enabled) is
+--                         always captured at the stop frame.
+local function read_memory_widthed(domain, address, width)
+    if domain then
+        if not CAPS.memory_use_memory_domain then
+            error("memory.usememorydomain not available — needed for observe_memory with explicit domain")
+        end
+        local prev = memory.getcurrentmemorydomain and memory.getcurrentmemorydomain() or nil
+        if not memory.usememorydomain(domain) then
+            error("unknown memory domain: " .. tostring(domain))
+        end
+        local v
+        if     width == "u8"  then v = memory.read_u8(address)
+        elseif width == "u16" then v = memory.read_u16_le(address)
+        elseif width == "u32" then v = memory.read_u32_le(address)
+        else error("width must be 'u8', 'u16', or 'u32' (got " .. tostring(width) .. ")") end
+        if prev then memory.usememorydomain(prev) end
+        return v
+    else
+        if     width == "u8"  then return memory.read_u8(address)
+        elseif width == "u16" then return memory.read_u16_le(address)
+        elseif width == "u32" then return memory.read_u32_le(address)
+        else error("width must be 'u8', 'u16', or 'u32'") end
+    end
+end
+
 local function cmd_play_input_sequence(p)
     if not CAPS.joypad_set    then error("joypad.set not available") end
     if not CAPS.frameadvance  then error("emu.frameadvance not available") end
@@ -227,13 +263,43 @@ local function cmd_play_input_sequence(p)
     local screenshot_every  = p.screenshot_every
     local screenshot_dir    = p.screenshot_dir    or "C:/temp"
     local screenshot_prefix = p.screenshot_prefix or "obs"
-    local observations = {}
     if screenshot_every and not CAPS.screenshot then
         error("screenshot_every requested but client.screenshot is not available on this build")
     end
 
-    local count = 0
-    local total = #frames
+    local observe_memory = p.observe_memory  -- nil or array of {name, domain, address, width}
+    local stop_spec      = p.stop_on_memory_change  -- nil or {domain, address, width}
+
+    -- Capture initial value for stop-on-change
+    local stop_initial = nil
+    if stop_spec then
+        stop_initial = read_memory_widthed(stop_spec.domain, stop_spec.address, stop_spec.width)
+    end
+
+    local observations = {}
+    local count   = 0
+    local total   = #frames
+    local stopped = false
+    local stop_reason = nil
+
+    -- Helper: capture an observation at the current frame.
+    local function capture_observation()
+        local obs = { frame_offset = count }
+        if screenshot_every then
+            local path = string.format("%s/%s-%04d.png", screenshot_dir, screenshot_prefix, count)
+            client.screenshot(path)
+            obs.path = path
+        end
+        if observe_memory then
+            local mem = {}
+            for _, spec in ipairs(observe_memory) do
+                mem[spec.name] = read_memory_widthed(spec.domain, spec.address, spec.width)
+            end
+            obs.memory = mem
+        end
+        table.insert(observations, obs)
+    end
+
     for i, frame in ipairs(frames) do
         local buttons = (type(frame) == "table" and frame.buttons) or {}
         local player  = (type(frame) == "table" and frame.player) or 1
@@ -241,13 +307,23 @@ local function cmd_play_input_sequence(p)
         emu.frameadvance()
         count = count + 1
 
-        if screenshot_every and (count % screenshot_every == 0 or count == total) then
-            local path = string.format("%s/%s-%04d.png", screenshot_dir, screenshot_prefix, count)
-            client.screenshot(path)
-            table.insert(observations, {
-                frame_offset = count,
-                path = path,
-            })
+        -- Check stop condition AFTER the frame advances
+        if stop_spec then
+            local cur = read_memory_widthed(stop_spec.domain, stop_spec.address, stop_spec.width)
+            if cur ~= stop_initial then
+                stopped = true
+                stop_reason = "memory_changed"
+                -- Always capture the stop frame as an observation (regardless of screenshot_every cadence)
+                if screenshot_every or observe_memory then
+                    capture_observation()
+                end
+                break
+            end
+        end
+
+        -- Periodic observation (only if we didn't already capture for stop)
+        if (screenshot_every or observe_memory) and (count % (screenshot_every or 0xFFFF) == 0 or count == total) then
+            capture_observation()
         end
     end
 
@@ -255,6 +331,8 @@ local function cmd_play_input_sequence(p)
         played = count,
         final_framecount = CAPS.framecount and emu.framecount() or nil,
         observations = observations,
+        stopped_early = stopped,
+        stop_reason = stop_reason,
     }
 end
 

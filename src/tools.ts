@@ -264,11 +264,11 @@ const TOOLS: Tool[] = [
   {
     name: "bizhawk_play_input_sequence",
     description:
-      "PURPOSE: Play a pre-built sequence of per-frame joypad inputs back-to-back, advancing one frame per element, ENTIRELY SERVER-SIDE in a single bridge round-trip. Optionally captures screenshots at fixed frame intervals during the play and returns them inline so the agent can see what happened without separate read tool calls. " +
-      "USAGE: Use whenever you have ≥10 frames of inputs to play in order — TAS movie playback, scripted multi-frame sequences, AI-search of input patterns, agent-driven gameplay. ONE bridge round-trip ships N frames instead of the 2N round-trips you'd pay looping bizhawk_press_buttons + bizhawk_frame_advance(1). For sequences of 1-9 frames, the loop is fine. For sequences over ~200 frames, CHUNK into multiple calls. " +
-      "FOR AGENT-DRIVEN PLAY: pass `screenshot_every` (e.g. 60 to capture every 1 second of game time) so screenshots come back inline with the play result — you immediately see Samus's trajectory across the batch instead of having to call screenshot/read separately afterward. This also avoids the 'idle-tick drift' problem where the bridge advances the game while you're composing the next batch: by including observations IN the play call, you see the actual state at exit. " +
-      "BEHAVIOR: For each `frames` element, calls joypad.set with that frame's buttons then emu.frameadvance. The bridge's main poll loop is BLOCKED for the duration of the call (no other RPCs, no heartbeat) until the sequence finishes or fails. With `screenshot_every`, each captured screenshot adds ~1 frame of wall-clock per shot (client.screenshot blocks briefly), so capturing every 5 frames doubles batch time — capturing every 30-60 frames is the sane range. Screenshots are written to `screenshot_dir` (default C:/temp) with names like `<prefix>-NNNN.png` where NNNN is the frame offset within the batch. The Node side reads each PNG back from disk, base64-encodes it, and returns it as an inline `image` content block in the tool response. Returns an error if joypad.set or emu.frameadvance is missing, if `frames` isn't an array, if `screenshot_every` is set but client.screenshot isn't available, or if `screenshot_dir` isn't writable. " +
-      "RETURNS: A text line 'Played N frames. Final framecount: M. Captured K observations.' followed by K inline image content blocks (PNG screenshots, one per observation). The text line names each observation's frame_offset so the agent can correlate image-N with the game frame it captures.",
+      "PURPOSE: Play a pre-built sequence of per-frame joypad inputs back-to-back, advancing one frame per element, ENTIRELY SERVER-SIDE in a single bridge round-trip. Optionally captures screenshots AND labeled memory reads at fixed frame intervals during the play, and optionally aborts play early when a specified memory address changes. All observations come back inline so the agent sees the full trajectory + game state in one tool response. " +
+      "USAGE: Use whenever you have ≥10 frames of inputs to play in order — TAS movie playback, scripted multi-frame sequences, AI-search of input patterns, agent-driven gameplay. ONE bridge round-trip ships N frames instead of the 2N round-trips you'd pay looping bizhawk_press_buttons + bizhawk_frame_advance(1). For sequences over ~200 frames, CHUNK. " +
+      "FOR AGENT-DRIVEN PLAY: combine `screenshot_every`, `observe_memory`, and `stop_on_memory_change` for the killer pattern — 'walk right for up to 200 frames, observing screenshot+x+y+hp every second, but STOP the moment the room ID changes'. The agent sees: where Samus was at each second, AND whether the goal (room transition) was reached, AND screenshots for visual confirmation — all in one tool response. " +
+      "BEHAVIOR: For each `frames` element, calls joypad.set with that frame's buttons then emu.frameadvance. The bridge's main poll loop is BLOCKED for the duration of the call (no other RPCs, no heartbeat) until the sequence finishes or fails. With `screenshot_every`, each captured screenshot adds ~1 frame of wall-clock. With `observe_memory`, each observation also reads the listed memory addresses at the same frame the screenshot was taken — values come back labeled by `name` in each observation's `memory` field. With `stop_on_memory_change`, the bridge records the listed address's value before the first frame, re-reads it after each frame, and aborts the sequence the moment it changes (a final observation is captured at the stop frame regardless of cadence). Returns an error if joypad.set / emu.frameadvance / client.screenshot is missing when needed, if any `observe_memory` entry references an unknown domain, if any `width` isn't 'u8' / 'u16' / 'u32', or if any address is out of range. " +
+      "RETURNS: A text summary ('Played N frames. Final framecount: M. Stopped early: yes/no [reason]. Captured K observations with their memory values') followed by K inline image content blocks (one per observation, in frame order). Each observation in the text summary includes its frame_offset and labeled memory values so the agent can correlate the visible screenshot with the game state at that exact frame.",
     inputSchema: {
       type: "object",
       required: ["frames"],
@@ -303,7 +303,7 @@ const TOOLS: Tool[] = [
           type: "integer",
           minimum: 1,
           description:
-            "Optional. If set, capture a PNG screenshot every N frames during playback (and one extra at the final frame regardless of remainder). Each screenshot costs ~1 wall-clock frame for client.screenshot, so 60 (≈1 sec of game time) is a good default — captures meaningful state changes without doubling batch latency. Omit to skip observation entirely (just play). Requires the loaded core to expose client.screenshot (check capabilities.screenshot in bizhawk_get_info).",
+            "Optional. If set, capture a PNG screenshot every N frames during playback (and one extra at the final frame regardless of remainder). Each screenshot costs ~1 wall-clock frame for client.screenshot, so 60 (≈1 sec of game time) is a good default — captures meaningful state changes without doubling batch latency. Omit to skip screenshots. If `observe_memory` is also set, screenshots and memory reads happen at the same observation points.",
         },
         screenshot_dir: {
           type: "string",
@@ -313,7 +313,62 @@ const TOOLS: Tool[] = [
         screenshot_prefix: {
           type: "string",
           description:
-            "Optional. Filename prefix for screenshots when `screenshot_every` is set. Default: 'obs'. Useful for tagging screenshots from different batches in the same directory.",
+            "Optional. Filename prefix for screenshots when `screenshot_every` is set. Default: 'obs'.",
+        },
+        observe_memory: {
+          type: "array",
+          description:
+            "Optional. List of memory reads to perform at each observation point (alongside screenshots if `screenshot_every` is also set). Each result lands in the observation's `memory` field keyed by `name`. " +
+            "Use this to track game-state values per observation — e.g. on Super Metroid, track HP/X/Y/room-ID at each screenshot so you see how state changes across the play batch.",
+          items: {
+            type: "object",
+            required: ["name", "address", "width"],
+            additionalProperties: false,
+            properties: {
+              name: {
+                type: "string",
+                description: "Label for this reading in the output observation. Choose something semantic (e.g. 'hp', 'samus_x', 'room').",
+              },
+              domain: {
+                type: "string",
+                description: "Optional case-sensitive memory domain. Omit to use BizHawk's currently selected domain. Same semantics as the standalone read tools.",
+              },
+              address: {
+                type: "integer",
+                minimum: 0,
+                description: "Byte offset within the chosen memory domain (0-based per-domain).",
+              },
+              width: {
+                type: "string",
+                enum: ["u8", "u16", "u32"],
+                description: "Read width. 'u16'/'u32' are little-endian (BizHawk's default). For big-endian reads, use width 'u8' multiple times and reassemble client-side (rare).",
+              },
+            },
+          },
+        },
+        stop_on_memory_change: {
+          type: "object",
+          description:
+            "Optional. If set, the bridge reads the specified memory value before the first frame, re-reads it after every frame, and ABORTS the play sequence the moment it changes. The result will have `stopped_early: true` and `stop_reason: 'memory_changed'`. A final observation is captured at the stop frame even if it's not on the normal cadence. " +
+            "Killer use case: watch the room ID — Samus walks through a door, room ID changes, play stops at the exact frame of the transition.",
+          required: ["address", "width"],
+          additionalProperties: false,
+          properties: {
+            domain: {
+              type: "string",
+              description: "Optional case-sensitive memory domain. Same semantics as observe_memory[].domain.",
+            },
+            address: {
+              type: "integer",
+              minimum: 0,
+              description: "Byte offset within the chosen memory domain to monitor.",
+            },
+            width: {
+              type: "string",
+              enum: ["u8", "u16", "u32"],
+              description: "Read width for the monitored value. Must match the underlying field's actual width (a u8 watch on a u16 field will only trigger on low-byte changes).",
+            },
+          },
         },
       },
       additionalProperties: false,
@@ -515,32 +570,51 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
 
       case "bizhawk_play_input_sequence": {
         const params: Record<string, unknown> = { frames: p.frames };
-        if (p.screenshot_every  !== undefined) params.screenshot_every  = p.screenshot_every;
-        if (p.screenshot_dir    !== undefined) params.screenshot_dir    = p.screenshot_dir;
-        if (p.screenshot_prefix !== undefined) params.screenshot_prefix = p.screenshot_prefix;
+        if (p.screenshot_every       !== undefined) params.screenshot_every       = p.screenshot_every;
+        if (p.screenshot_dir         !== undefined) params.screenshot_dir         = p.screenshot_dir;
+        if (p.screenshot_prefix      !== undefined) params.screenshot_prefix      = p.screenshot_prefix;
+        if (p.observe_memory         !== undefined) params.observe_memory         = p.observe_memory;
+        if (p.stop_on_memory_change  !== undefined) params.stop_on_memory_change  = p.stop_on_memory_change;
         const r = await bh.call<{
           played: number;
           final_framecount?: number;
-          observations?: { frame_offset: number; path: string }[];
+          stopped_early?: boolean;
+          stop_reason?: string;
+          observations?: {
+            frame_offset: number;
+            path?: string;
+            memory?: Record<string, number>;
+          }[];
         }>("play_input_sequence", params);
 
         const obs = r.observations ?? [];
-        const summary =
-          `Played ${r.played} frames. Final framecount: ${r.final_framecount ?? "(unavailable)"}. ` +
-          `Captured ${obs.length} observations` +
-          (obs.length > 0
-            ? ` at frame offsets ${obs.map(o => o.frame_offset).join(", ")}.`
-            : ".");
-
-        // Build the multi-content response: text summary + one inline image
-        // block per observation. We read the PNG from disk (Lua already wrote
-        // it) and base64-encode for MCP transport.
-        const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
-          { type: "text", text: summary },
+        const lines = [
+          `Played ${r.played} frames. Final framecount: ${r.final_framecount ?? "(unavailable)"}.`,
         ];
+        if (r.stopped_early) {
+          lines.push(`Stopped early — reason: ${r.stop_reason ?? "(unspecified)"}.`);
+        }
+        lines.push(`Captured ${obs.length} observation${obs.length === 1 ? "" : "s"}.`);
+        // Per-observation lines so the agent can correlate inline images with state
+        for (let i = 0; i < obs.length; i++) {
+          const o = obs[i];
+          const memStr = o.memory
+            ? ` memory={${Object.entries(o.memory).map(([k, v]) => `${k}=${v}`).join(", ")}}`
+            : "";
+          const imgStr = o.path ? ` (image ${i + 1})` : "";
+          lines.push(`  obs[${i}] frame_offset=${o.frame_offset}${memStr}${imgStr}`);
+        }
+
+        // Build the multi-content response: text summary + per-observation
+        // inline image blocks. We read each PNG from disk (Lua wrote it),
+        // base64-encode for MCP transport.
+        const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
+          { type: "text", text: lines.join("\n") },
+        ];
+        const fs = await import("node:fs");
         for (const o of obs) {
+          if (!o.path) continue;
           try {
-            const fs = await import("node:fs");
             const bytes = fs.readFileSync(o.path);
             content.push({
               type: "image",
