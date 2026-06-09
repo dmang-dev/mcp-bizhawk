@@ -4,6 +4,10 @@
 [![npm downloads](https://img.shields.io/npm/dm/mcp-bizhawk.svg)](https://www.npmjs.com/package/mcp-bizhawk)
 [![CI](https://github.com/dmang-dev/mcp-bizhawk/actions/workflows/ci.yml/badge.svg)](https://github.com/dmang-dev/mcp-bizhawk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/npm/l/mcp-bizhawk.svg)](LICENSE)
+[![Snyk](https://snyk.io/test/npm/mcp-bizhawk/badge.svg)](https://snyk.io/test/npm/mcp-bizhawk)
+[![Socket](https://img.shields.io/badge/Socket-security-2F7BFF?logo=socket)](https://socket.dev/npm/package/mcp-bizhawk)
+[![Bundlephobia](https://img.shields.io/badge/bundlephobia-size-FF6B81)](https://bundlephobia.com/package/mcp-bizhawk)
+[![npmgraph](https://img.shields.io/badge/npmgraph-dependencies-2496ED)](https://npmgraph.js.org/?q=mcp-bizhawk)
 
 An [MCP](https://modelcontextprotocol.io) server that exposes [BizHawk](https://github.com/TASEmulators/BizHawk) — the multi-system emulator the TAS community lives in — to any MCP-compatible client (Claude Desktop, Claude Code, etc.).
 
