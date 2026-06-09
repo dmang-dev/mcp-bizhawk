@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bizhawk_search_memory`** — Cheat-Engine-style value scan with iterative
+  narrowing. FIRST scan (no `addresses`) sweeps a domain — or a
+  `start`/`length` window — for cells equal to `value` at width `u8`/`u16`/`u32`
+  and returns the matching per-domain offsets; NEXT scan (pass the prior
+  `addresses`) re-reads only those and keeps the ones that still match, the
+  classic "the value changed — which candidates hold now?" loop. Uses a
+  bulk-read fast path (`memory.read_bytes_as_array` / `readbyterange`) when the
+  build exposes one, falling back to a `read_u8` loop, and caps scan size and
+  result count to keep the single-frame stall bounded. Closes the memory-search
+  half of the completeness gap flagged on the Glama profile.
+
 ## [0.1.5] - 2026-05-15
 
 Tier 3 of agent-vision: labeled memory observations alongside screenshots,

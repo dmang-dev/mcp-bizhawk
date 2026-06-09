@@ -229,6 +229,36 @@ const TOOLS: Tool[] = [
     },
   },
 
+  // ── Memory search ─────────────────────────────────────────────────────────
+
+  {
+    name: "bizhawk_search_memory",
+    description:
+      "PURPOSE: Find every address in a memory domain whose value equals a target — a Cheat-Engine-style value scan with iterative narrowing. " +
+      "USAGE: Two modes. FIRST scan — omit `addresses`: sweeps the whole domain (or the [start, start+length) window you give) and returns matching offsets. NEXT scan — pass `addresses` (the offsets a prior scan returned): keeps only those that STILL equal `value`, the classic 'the value changed to X — which of my candidates match now?' narrowing. Typical RAM hunt: search a known value (lives=3) → play until it changes → search the new value passing the prior addresses → repeat until a handful remain, then poke them with bizhawk_write*. Pick `width` to match the field size; leave `aligned` true (steps by the width — fast and standard) unless you suspect an unaligned value. " +
+      "BEHAVIOR: No side effects — pure read. A FIRST scan runs synchronously inside one bridge tick and briefly stalls the emulator: it bulk-reads the window in one engine call where the build supports it (cap 16 MiB per scan) and falls back to a byte-by-byte read otherwise (cap 256 KiB per scan — chunk larger windows with start+length). Results are capped at `max_results` (default 200); when more matched, `count` reports the true total and the result is flagged truncated — narrow with a more specific value or range. A NEXT scan is exact over whatever addresses you pass. Returns an error on unknown domain, a value out of range for the width, or a scan window over the cap. " +
+      "RETURNS: A summary line (match count, value, width, bytes scanned) followed by the matching offsets as per-domain hex (0-based — the same offsets the read/write tools take).",
+    inputSchema: {
+      type: "object",
+      required: ["value"],
+      properties: {
+        value: { type: "integer", minimum: 0, maximum: 4294967295, description: "Target value to find. Must fit the chosen width (0-255 for u8, 0-65535 for u16, 0-4294967295 for u32)." },
+        width: { type: "string", enum: ["u8", "u16", "u32"], default: "u16", description: "Value width. u16/u32 are little-endian (BizHawk default). Match the field's real size — a u8 search won't find a 16-bit counter." },
+        addresses: {
+          type: "array",
+          items: { type: "integer", minimum: 0 },
+          description: "NEXT-scan candidate offsets (from a prior scan's output). When present, only these are re-read and filtered; `start`/`length`/`aligned` are ignored.",
+        },
+        start: { type: "integer", minimum: 0, default: 0, description: "FIRST-scan window start (0-based domain offset). Default 0." },
+        length: { type: "integer", minimum: 1, description: "FIRST-scan window length in bytes. Omit to scan to the end of the domain (needs memory.getmemorydomainsize on the build)." },
+        aligned: { type: "boolean", default: true, description: "FIRST-scan stride: true steps by the width (aligned — fast, standard for game values); false steps by 1 byte (catches unaligned values, slower)." },
+        domain: { type: "string", description: DOMAIN_PARAM_DESC },
+        max_results: { type: "integer", minimum: 1, maximum: 5000, default: 200, description: "Max offsets to return (1-5000, default 200). `count` always reports the true match total even when the returned list is truncated." },
+      },
+      additionalProperties: false,
+    },
+  },
+
   // ── Input ───────────────────────────────────────────────────────────────
 
   {
@@ -559,6 +589,35 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
       case "bizhawk_write_range": {
         const r = await bh.call<{ written: number }>("write_range", { address: a(), bytes: p.bytes, ...dom() });
         return ok(`Wrote ${r.written} bytes → ${addrHex(a())}${p.domain ? ` (${p.domain})` : ""}`);
+      }
+
+      case "bizhawk_search_memory": {
+        const params: Record<string, unknown> = { value: p.value, width: p.width ?? "u16" };
+        if (p.addresses   !== undefined) params.addresses   = p.addresses;
+        if (p.start       !== undefined) params.start       = p.start;
+        if (p.length      !== undefined) params.length      = p.length;
+        if (p.aligned     !== undefined) params.aligned     = p.aligned;
+        if (p.max_results !== undefined) params.max_results = p.max_results;
+        if (p.domain      !== undefined) params.domain      = p.domain;
+        const r = await bh.call<{
+          mode: string;
+          addresses: number[];
+          count: number;
+          candidates?: number;
+          scanned?: number;
+          truncated?: boolean;
+        }>("search_memory", params);
+        const width = (p.width as string) ?? "u16";
+        const domLabel = p.domain ? ` in ${p.domain}` : "";
+        const shown = r.addresses.length;
+        const head = r.mode === "next"
+          ? `${r.count} of ${r.candidates} candidate(s) still equal ${fmtHex(p.value)} (${width})${domLabel}.`
+          : `${r.count} match(es) for ${fmtHex(p.value)} (${width})${domLabel} [scanned ${r.scanned} bytes].`;
+        const note = r.truncated
+          ? ` Showing first ${shown} — raise max_results or narrow the search to see the rest.`
+          : (shown ? ` Showing all ${shown}.` : "");
+        const list = shown ? "\n" + r.addresses.map((o) => addrHex(o)).join(" ") : "";
+        return ok(`${head}${note}${list}`);
       }
 
       case "bizhawk_press_buttons": {
