@@ -39,7 +39,7 @@ Trade-off: this design adds **~one frame of latency** per call (≈16ms at 60Hz)
 ## Requirements
 
 - [BizHawk](https://github.com/TASEmulators/BizHawk/releases) **2.6.2 or newer** (earlier builds use an older socket-server wire format)
-- **Node.js 18+** (for the MCP server)
+- **Node.js 22+** (for the MCP server)
 
 Tested on BizHawk 2.11.1 across SNES (Super Metroid). Should work on any system BizHawk supports.
 
