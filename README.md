@@ -224,6 +224,16 @@ node .scratch/test-all.cjs "I:\path\to\your\rom.smc"
 
 Set `DEBUG=1` to dump every RX/TX line.
 
+## Debugging with the MCP Inspector
+
+Browse and call this server's tools interactively with the [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
+
+```bash
+npm run inspector
+```
+
+Build first if you've edited `src/` since your last `npm install` (`npm run build`, or keep `npm run dev` running). Override the listener with `BIZHAWK_HOST` / `BIZHAWK_PORT` (default `127.0.0.1:8766`). `tools/list` works even without BizHawk connected; *calling* a tool needs EmuHawk running with the socket flags and `lua/bridge.lua` loaded.
+
 ## License
 
 [MIT](LICENSE)

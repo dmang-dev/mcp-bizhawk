@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bizhawk_press_buttons_multi`** — set several controllers' input on the
+  SAME upcoming frame in one call (array of `{player, buttons}`). The bridge
+  does one `emu.frameadvance()` per tick, so two separate `bizhawk_press_buttons`
+  calls land on *different* frames; this applies them all before the next single
+  advance, enabling true simultaneous multi-controller input (P1 + P2 acting on
+  the same frame) for 2-player fighting/racing/co-op titles. One-frame input,
+  same as `bizhawk_press_buttons`. Adds a shared `set_joypad` bridge helper.
+  Closes the multi-controller half of the completeness gap from the Glama
+  profile. (Per-controller *addressing* — driving P2/P3/P4 individually — was
+  already supported via the `player` parameter on `bizhawk_press_buttons` and
+  `bizhawk_play_input_sequence`.)
 - **`bizhawk_search_memory`** — Cheat-Engine-style value scan with iterative
   narrowing. FIRST scan (no `addresses`) sweeps a domain — or a
   `start`/`length` window — for cells equal to `value` at width `u8`/`u16`/`u32`
