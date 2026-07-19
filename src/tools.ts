@@ -262,6 +262,41 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "bizhawk_press_buttons_multi",
+    description:
+      "PURPOSE: Set joypad input for MULTIPLE controllers at once, all applied to the SAME next emulated frame. " +
+      "USAGE: Use for 2+ player games where controllers must act on the same frame — fighting, racing, co-op (e.g. P1 presses A while P2 presses Right on the very same frame). This is the ONLY way to get simultaneous multi-controller input: calling bizhawk_press_buttons twice in a row lands the two presses on DIFFERENT frames, because each bridge command is followed by exactly one frame advance. For a single controller use bizhawk_press_buttons; for long scripted single-controller runs use bizhawk_play_input_sequence. " +
+      "Like bizhawk_press_buttons this is ONE-FRAME input — to HOLD across N frames, interleave bizhawk_press_buttons_multi + bizhawk_frame_advance(count=1) N times (do NOT call it once then frame_advance(count=N); only the first frame would see the input). " +
+      "BEHAVIOR: Calls joypad.set once per listed controller before the next frame advance, so they all take effect together. For each listed player, anything not in its `buttons` map is released; players you omit entirely are left to whatever the human is holding (usually nothing). Returns an error if the loaded core doesn't expose joypad.set. Button names not valid for the active core are silently ignored by BizHawk. " +
+      "RETURNS: Single line e.g. 'Set 2 controller(s) for next frame — P1: A+Right; P2: B'. " +
+      `\n\nButton names vary per system. Common names across cores: ${VALID_BUTTONS.join(", ")}.`,
+    inputSchema: {
+      type: "object",
+      required: ["players"],
+      properties: {
+        players: {
+          type: "array",
+          minItems: 1,
+          description: "One entry per controller to drive this frame. Each entry sets that player's full input for the upcoming frame; list every controller that must act simultaneously.",
+          items: {
+            type: "object",
+            required: ["player", "buttons"],
+            additionalProperties: false,
+            properties: {
+              player: { type: "integer", minimum: 1, description: "Player number (1-based): 1, 2, 3, 4 … Maps to the controller port on multi-controller cores (SNES multitap, N64, Genesis)." },
+              buttons: {
+                type: "object",
+                additionalProperties: { type: "boolean" },
+                description: "Map of button name → pressed (boolean). Same semantics as bizhawk_press_buttons.buttons. Empty object = no input for this player on this frame.",
+              },
+            },
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "bizhawk_play_input_sequence",
     description:
       "PURPOSE: Play a pre-built sequence of per-frame joypad inputs back-to-back, advancing one frame per element, ENTIRELY SERVER-SIDE in a single bridge round-trip. Optionally captures screenshots AND labeled memory reads at fixed frame intervals during the play, and optionally aborts play early when a specified memory address changes. All observations come back inline so the agent sees the full trajectory + game state in one tool response. " +
@@ -566,6 +601,16 @@ export function registerTools(server: Server, bh: BizhawkServer): void {
         const pressed = Object.entries(p.buttons as Record<string, boolean>)
           .filter(([, v]) => v).map(([k]) => k);
         return ok(`Set joypad ${p.player ?? 1}: ${pressed.length ? pressed.join("+") : "(all released)"}`);
+      }
+
+      case "bizhawk_press_buttons_multi": {
+        const players = p.players as Array<{ player: number; buttons: Record<string, boolean> }>;
+        await bh.call("press_buttons_multi", { players });
+        const summary = players.map((e) => {
+          const pressed = Object.entries(e.buttons ?? {}).filter(([, v]) => v).map(([k]) => k);
+          return `P${e.player}: ${pressed.length ? pressed.join("+") : "(none)"}`;
+        }).join("; ");
+        return ok(`Set ${players.length} controller(s) for next frame — ${summary}`);
       }
 
       case "bizhawk_play_input_sequence": {

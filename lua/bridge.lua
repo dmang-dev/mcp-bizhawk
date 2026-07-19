@@ -195,12 +195,33 @@ end
 
 -- Joypad. p.buttons is a table like {A=true, Up=true, Start=true}.
 -- p.player defaults to 1.
-local function cmd_press_buttons(p)
+local function set_joypad(buttons, player)
     if not CAPS.joypad_set then error("joypad.set not available") end
+    joypad.set(buttons or {}, player or 1)
+end
+
+local function cmd_press_buttons(p)
     local buttons = assert(p.buttons, "buttons required (table like {A=true, Up=true})")
-    local player  = p.player or 1
-    joypad.set(buttons, player)
+    set_joypad(buttons, p.player or 1)
     return true
+end
+
+-- Set several controllers for the SAME upcoming frame. `p.players` is an array
+-- of { player = N, buttons = {A=true, ...} }. The bridge does exactly one
+-- emu.frameadvance() per tick, so two separate press_buttons calls land on
+-- DIFFERENT frames; applying them all here, before the next single frame
+-- advance, makes them act simultaneously (e.g. P1 + P2 in a 2-player game).
+local function cmd_press_buttons_multi(p)
+    local players = assert(p.players, "players required (array of {player, buttons})")
+    if type(players) ~= "table" then error("players must be an array") end
+    local applied = {}
+    for _, entry in ipairs(players) do
+        local player  = (type(entry) == "table" and entry.player)  or 1
+        local buttons = (type(entry) == "table" and entry.buttons) or {}
+        set_joypad(buttons, player)
+        applied[#applied + 1] = player
+    end
+    return { players = applied }
 end
 
 -- Batched input playback. Takes a list of per-frame inputs and runs them
@@ -390,6 +411,7 @@ local HANDLERS = {
     write_range          = cmd_write_range,
     list_memory_domains  = cmd_list_memory_domains,
     press_buttons        = cmd_press_buttons,
+    press_buttons_multi  = cmd_press_buttons_multi,
     play_input_sequence  = cmd_play_input_sequence,
     pause                = cmd_pause,
     unpause              = cmd_unpause,
