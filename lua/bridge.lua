@@ -74,6 +74,11 @@ local CAPS = {
     memory_get_memorydomain_list   = memory and has(memory, "getmemorydomainlist"),
     memory_get_current_memorydomain = memory and has(memory, "getcurrentmemorydomain"),
     memory_use_memory_domain       = memory and has(memory, "usememorydomain"),
+    memory_get_memorydomainsize    = memory and has(memory, "getmemorydomainsize"),
+    -- bulk readers (vary by build) — used to make memory search fast; we fall
+    -- back to a read_u8 loop when neither is present.
+    memory_read_bytes_as_array     = memory and has(memory, "read_bytes_as_array"),
+    memory_readbyterange           = memory and has(memory, "readbyterange"),
     -- mainmemory (subset of memory, scoped to system main RAM)
     mainmemory_read_u8 = mainmemory and has(mainmemory, "read_u8"),
     -- gameinfo
@@ -134,6 +139,16 @@ local function in_domain(domain, fn)
     return r
 end
 
+-- Read a single value of the given width ("u8"/"u16"/"u32") at `address` in the
+-- CURRENT memory domain. Little-endian (BizHawk's default), matching the
+-- read16/read32 tools. Shared by read_memory_widthed and the memory search.
+local function read_at_width(address, width)
+    if     width == "u8"  then return memory.read_u8(address)
+    elseif width == "u16" then return memory.read_u16_le(address)
+    elseif width == "u32" then return memory.read_u32_le(address)
+    else error("width must be 'u8', 'u16', or 'u32' (got " .. tostring(width) .. ")") end
+end
+
 local function cmd_read8(p)
     local addr = assert(p.address, "address required")
     return in_domain(p.domain, function() return memory.read_u8(addr) end)
@@ -183,6 +198,117 @@ local function cmd_write_range(p)
     return in_domain(p.domain, function()
         for i, b in ipairs(bytes) do memory.write_u8(addr + i - 1, b) end
         return { written = #bytes }
+    end)
+end
+
+-- ── Memory search ───────────────────────────────────────────────────────────
+--
+-- Two modes, mirroring a Cheat-Engine "first scan" / "next scan" workflow:
+--   * FIRST scan: no `addresses` given — sweep a contiguous region of the
+--     domain for cells equal to `value` and return the matching offsets.
+--   * NEXT scan: `addresses` given (the offsets a prior scan returned) — re-read
+--     only those and keep the ones that STILL equal `value`. Exact and cheap.
+--
+-- The first scan briefly stalls the emulator (it runs synchronously inside one
+-- bridge tick). We bulk-read the region in one engine call when the build
+-- exposes a bulk reader, and fall back to a read_u8 loop (with a tighter cap)
+-- otherwise.
+local SEARCH_BULK_CAP   = 16 * 1024 * 1024  -- max bytes/scan via bulk read
+local SEARCH_LOOP_CAP   = 262144            -- max bytes/scan via read_u8 fallback
+local SEARCH_RESULT_MAX = 5000              -- hard ceiling on returned offsets
+
+local function width_meta(width)
+    if     width == "u8"  then return 1, 0xFF
+    elseif width == "u16" then return 2, 0xFFFF
+    elseif width == "u32" then return 4, 0xFFFFFFFF
+    else error("width must be 'u8', 'u16', or 'u32' (got " .. tostring(width) .. ")") end
+end
+
+-- Bulk-read `len` bytes from `addr` in the CURRENT domain into a 1-indexed Lua
+-- array, or return nil if this build exposes no bulk reader (caller loops).
+-- BizHawk's bulk readers are 0-indexed; re-pack to 1-indexed.
+local function bulk_read_bytes(addr, len)
+    local raw
+    if     CAPS.memory_read_bytes_as_array then raw = memory.read_bytes_as_array(addr, len)
+    elseif CAPS.memory_readbyterange       then raw = memory.readbyterange(addr, len)
+    else return nil end
+    local out = {}
+    local base = (raw[0] ~= nil) and 0 or 1
+    for i = 0, len - 1 do out[i + 1] = raw[base + i] end
+    return out
+end
+
+local function cmd_search_memory(p)
+    local value = assert(p.value, "value required")
+    local width = p.width or "u16"
+    local wbytes, wmax = width_meta(width)
+    if value < 0 or value > wmax then
+        error(string.format("value %d out of range for width %s (0..%d)", value, width, wmax))
+    end
+    local cap = p.max_results or 200
+    if cap < 1 then cap = 1 elseif cap > SEARCH_RESULT_MAX then cap = SEARCH_RESULT_MAX end
+
+    -- NEXT scan: filter a caller-supplied candidate set.
+    if p.addresses ~= nil then
+        if type(p.addresses) ~= "table" then error("addresses must be an array of domain offsets") end
+        return in_domain(p.domain, function()
+            local kept, total = {}, 0
+            for _, addr in ipairs(p.addresses) do
+                if read_at_width(addr, width) == value then
+                    total = total + 1
+                    if #kept < cap then kept[#kept + 1] = addr end
+                end
+            end
+            return { mode = "next", addresses = kept, count = total,
+                     candidates = #p.addresses, truncated = total > #kept }
+        end)
+    end
+
+    -- FIRST scan: sweep a contiguous region.
+    local aligned = p.aligned
+    if aligned == nil then aligned = true end
+    local step  = aligned and wbytes or 1
+    local start = p.start or 0
+    if start < 0 then error("start must be >= 0") end
+
+    local length = p.length
+    if not length then
+        if not CAPS.memory_get_memorydomainsize then
+            error("no `length` given and memory.getmemorydomainsize is unavailable on this build — pass start+length to bound the scan")
+        end
+        local size = p.domain and memory.getmemorydomainsize(p.domain) or memory.getmemorydomainsize()
+        length = size - start
+    end
+    if length < wbytes then error("scan range smaller than one " .. width .. " value") end
+
+    local have_bulk = CAPS.memory_read_bytes_as_array or CAPS.memory_readbyterange
+    local cap_bytes = have_bulk and SEARCH_BULK_CAP or SEARCH_LOOP_CAP
+    if length > cap_bytes then
+        error(string.format("scan length %d exceeds the per-call cap of %d bytes (%s) — narrow with start+length and chunk",
+            length, cap_bytes, have_bulk and "bulk read" or "no bulk-read API on this build"))
+    end
+
+    return in_domain(p.domain, function()
+        local bytes = bulk_read_bytes(start, length)  -- 1-indexed, or nil
+        local matches, total = {}, 0
+        local o = 0
+        while o <= length - wbytes do
+            local v
+            if bytes then
+                if     width == "u8"  then v = bytes[o + 1]
+                elseif width == "u16" then v = bytes[o + 1] + bytes[o + 2] * 256
+                else                       v = bytes[o + 1] + bytes[o + 2] * 256 + bytes[o + 3] * 65536 + bytes[o + 4] * 16777216 end
+            else
+                v = read_at_width(start + o, width)
+            end
+            if v == value then
+                total = total + 1
+                if #matches < cap then matches[#matches + 1] = start + o end
+            end
+            o = o + step
+        end
+        return { mode = "first", addresses = matches, count = total,
+                 scanned = length, truncated = total > #matches }
     end)
 end
 
@@ -252,27 +378,7 @@ end
 --                         observation (if screenshot/memory enabled) is
 --                         always captured at the stop frame.
 local function read_memory_widthed(domain, address, width)
-    if domain then
-        if not CAPS.memory_use_memory_domain then
-            error("memory.usememorydomain not available — needed for observe_memory with explicit domain")
-        end
-        local prev = memory.getcurrentmemorydomain and memory.getcurrentmemorydomain() or nil
-        if not memory.usememorydomain(domain) then
-            error("unknown memory domain: " .. tostring(domain))
-        end
-        local v
-        if     width == "u8"  then v = memory.read_u8(address)
-        elseif width == "u16" then v = memory.read_u16_le(address)
-        elseif width == "u32" then v = memory.read_u32_le(address)
-        else error("width must be 'u8', 'u16', or 'u32' (got " .. tostring(width) .. ")") end
-        if prev then memory.usememorydomain(prev) end
-        return v
-    else
-        if     width == "u8"  then return memory.read_u8(address)
-        elseif width == "u16" then return memory.read_u16_le(address)
-        elseif width == "u32" then return memory.read_u32_le(address)
-        else error("width must be 'u8', 'u16', or 'u32'") end
-    end
+    return in_domain(domain, function() return read_at_width(address, width) end)
 end
 
 local function cmd_play_input_sequence(p)
@@ -409,6 +515,7 @@ local HANDLERS = {
     write32              = cmd_write32,
     read_range           = cmd_read_range,
     write_range          = cmd_write_range,
+    search_memory        = cmd_search_memory,
     list_memory_domains  = cmd_list_memory_domains,
     press_buttons        = cmd_press_buttons,
     press_buttons_multi  = cmd_press_buttons_multi,
