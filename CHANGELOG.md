@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-19
+
 ### Added
 
 - **`bizhawk_press_buttons_multi`** — set several controllers' input on the
@@ -161,7 +163,8 @@ bridge instead of a 12-fps stuttery crawl.
   `play_input_sequence`. The per-batch progress log now reports
   `final_framecount` for verification.
 
-[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.2.0
 [0.1.4]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.4
 [0.1.3]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.3
 
