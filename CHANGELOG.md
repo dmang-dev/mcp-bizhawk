@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result count to keep the single-frame stall bounded. Closes the memory-search
   half of the completeness gap flagged on the Glama profile.
 
+## [0.1.6] - 2026-06-11
+
 ### Changed
 
 - **BREAKING: minimum Node version raised from >=18 to >=22.** Node 18 (EOL
@@ -40,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LTS lines are. CI matrix now tests Node 22 + 24, and workflow actions
   bumped to `actions/checkout@v5` / `actions/setup-node@v5` (the v4 actions'
   Node 20 runtime is deprecated by GitHub as of June 2026).
+- **Docker base image moved to Debian 13 (trixie).**
+- **README badges added** for Socket, Snyk, Bundlephobia, and npmgraph.
+
+### Security
+
+- Bumped transitive dependencies to resolve outstanding `npm audit`
+  advisories.
 
 ## [0.1.5] - 2026-05-15
 
@@ -165,6 +174,7 @@ bridge instead of a 12-fps stuttery crawl.
 
 [Unreleased]: https://github.com/dmang-dev/mcp-bizhawk/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.2.0
+[0.1.6]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.6
 [0.1.4]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.4
 [0.1.3]: https://github.com/dmang-dev/mcp-bizhawk/releases/tag/v0.1.3
 
