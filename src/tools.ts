@@ -1,9 +1,5 @@
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { Tool } from "@modelcontextprotocol/server";
+import type { Server } from "@modelcontextprotocol/server";
 import { BizhawkServer } from "./bizhawk.js";
 
 const VALID_BUTTONS = [
@@ -549,9 +545,9 @@ function addrHex(n: number): string {
 }
 
 export function registerTools(server: Server, bh: BizhawkServer): void {
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler('tools/list', async () => ({ tools: TOOLS }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  server.setRequestHandler('tools/call', async (req) => {
     const { name, arguments: args = {} } = req.params;
     const p = args as Record<string, unknown>;
     const a = () => p.address as number;

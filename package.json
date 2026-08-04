@@ -33,7 +33,7 @@
   },
   "homepage": "https://github.com/dmang-dev/mcp-bizhawk#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/server": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
